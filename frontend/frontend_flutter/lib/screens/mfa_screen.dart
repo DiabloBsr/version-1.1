@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/auth_service.dart';
+import '../auth_provider.dart';
 
 class MFAScreen extends StatefulWidget {
   const MFAScreen({super.key});
@@ -13,22 +14,28 @@ class _MFAScreenState extends State<MFAScreen> {
   final otpCtrl = TextEditingController();
   bool loading = false;
 
+  @override
+  void dispose() {
+    otpCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> handleVerify() async {
     setState(() => loading = true);
+    final authState = AuthProvider.of(context);
 
-    final result =
-        await AuthService.verifyMFA(otpCtrl.text.trim()); // ✅ correction ici
-
+    final result = await AuthService.verifyMFA(otpCtrl.text.trim());
+    if (!mounted) return;
     setState(() => loading = false);
 
     if (result['success'] == true) {
-      context.go('/home'); // ✅ redirection
+      authState.setOtpVerified(true);
+      context.go('/dashboard');
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result['error'] ?? 'OTP invalide'),
-          backgroundColor: Colors.red,
-        ),
+            content: Text(result['error'] ?? 'OTP invalide'),
+            backgroundColor: Colors.red),
       );
     }
   }
@@ -53,8 +60,7 @@ class _MFAScreenState extends State<MFAScreen> {
                   ? const SizedBox(
                       width: 24,
                       height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Vérifier'),
             ),
           ],

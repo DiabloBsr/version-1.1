@@ -4,6 +4,7 @@ from django.db import models
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import AbstractUser
+from django.core.validators import FileExtensionValidator
 
 
 class User(AbstractUser):
@@ -30,6 +31,29 @@ class User(AbstractUser):
     def __str__(self):
         return self.email
 
+    @property
+    def full_name(self):
+        """Retourne le nom complet depuis le profil si disponible."""
+        if hasattr(self, "profile") and self.profile is not None:
+            nom = (self.profile.nom or "").strip()
+            prenom = (self.profile.prenom or "").strip()
+            full = f"{nom} {prenom}".strip()
+            return full if full else self.username
+        return self.username
+
+    def enable_mfa(self, method="totp"):
+        """Active le MFA avec la méthode choisie."""
+        self.is_mfa_enabled = True
+        self.preferred_2fa = method
+        self.save(update_fields=["is_mfa_enabled", "preferred_2fa"])
+
+    def disable_mfa(self):
+        """Désactive complètement le MFA."""
+        self.is_mfa_enabled = False
+        self.totp_secret = None
+        self.is_mfa_verified = False
+        self.save(update_fields=["is_mfa_enabled", "totp_secret", "is_mfa_verified"])
+
     class Meta:
         ordering = ("-created_at",)
         verbose_name = _("user")
@@ -53,35 +77,54 @@ class Profile(models.Model):
         blank=True,
         related_name="profile",
     )
-    nom = models.CharField(max_length=100)
-    prenom = models.CharField(max_length=100)
-    sexe = models.CharField(max_length=1, choices=SEX_CHOICES)
-    date_naissance = models.DateField()
-    lieu_naissance = models.CharField(max_length=100)
-    cin_numero = models.CharField(max_length=20, unique=True)
-    cin_date_delivrance = models.DateField()
-    situation_matrimoniale = models.CharField(max_length=20, choices=MARITAL_CHOICES)
+    nom = models.CharField(max_length=100, blank=True)
+    prenom = models.CharField(max_length=100, blank=True)
+    sexe = models.CharField(max_length=1, choices=SEX_CHOICES, blank=True)
+    date_naissance = models.DateField(null=True, blank=True)
+    lieu_naissance = models.CharField(max_length=100, blank=True)
+    cin_numero = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    cin_date_delivrance = models.CharField(max_length=100, blank=True)
+    situation_matrimoniale = models.CharField(
+        max_length=20, choices=MARITAL_CHOICES, blank=True
+    )
     nombre_enfants = models.IntegerField(default=0)
     telephone = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
     adresse = models.TextField(blank=True)
+
+    # Photo de profil
+    photo = models.ImageField(
+        upload_to="profiles/",
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(allowed_extensions=["jpg", "jpeg", "png"])],
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property
     def age(self):
+        """Retourne l'âge si date_naissance est renseignée, sinon None."""
+        if not self.date_naissance:
+            return None
         today = date.today()
-        return today.year - self.date_naissance.year - (
-            (today.month, today.day) < (self.date_naissance.month, self.date_naissance.day)
+        return (
+            today.year - self.date_naissance.year
+            - ((today.month, today.day) < (self.date_naissance.month, self.date_naissance.day))
         )
 
     def anniversaire_est_proche(self, jours=7):
+        """Retourne True si l'anniversaire est dans X jours, sinon False."""
+        if not self.date_naissance:
+            return False
         today = date.today()
         anniversaire = self.date_naissance.replace(year=today.year)
         delta = (anniversaire - today).days
         return 0 <= delta <= jours
 
     def __str__(self):
-        return f"{self.nom} {self.prenom} ({self.user.email if self.user else 'no-user'})"
+        user_email = self.user.email if self.user else "no-user"
+        return f"{self.nom or ''} {self.prenom or ''} ({user_email})".strip()
 
     class Meta:
         ordering = ("-created_at",)

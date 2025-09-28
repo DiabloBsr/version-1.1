@@ -7,6 +7,9 @@ from rest_framework.views import APIView
 from rest_framework.generics import CreateAPIView
 from rest_framework_simplejwt.tokens import RefreshToken
 import pyotp
+import qrcode
+import io
+import base64
 
 from .serializers import RegisterSerializer
 
@@ -56,14 +59,31 @@ class PasswordResetRequestView(APIView):
 class MFASetupView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
+    def get(self, request):
         user = request.user
-        if not user.totp_secret:
+        if not getattr(user, "totp_secret", None):
             user.totp_secret = pyotp.random_base32()
             user.save()
+            print(f"[DEBUG] Nouveau secret généré pour {user.email}: {user.totp_secret}")
+        else:
+            print(f"[DEBUG] Secret existant pour {user.email}: {user.totp_secret}")
+
         totp = pyotp.TOTP(user.totp_secret)
         provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="BotaApp")
-        return Response({"provisioning_uri": provisioning_uri})
+        print(f"[DEBUG] Provisioning URI: {provisioning_uri}")
+
+        import qrcode, io, base64
+        qr = qrcode.make(provisioning_uri)
+        buffer = io.BytesIO()
+        qr.save(buffer, format="PNG")
+        qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+        print(f"[DEBUG] Longueur du QR base64: {len(qr_base64)}")
+
+        return Response({
+            "provisioning_uri": provisioning_uri,
+            "qr_base64": qr_base64
+        })
 
 
 class MFAVerifyView(APIView):
@@ -74,7 +94,7 @@ class MFAVerifyView(APIView):
         otp = request.data.get("otp")
         if not otp:
             return Response({"detail": "OTP required"}, status=status.HTTP_400_BAD_REQUEST)
-        if not user.totp_secret:
+        if not getattr(user, "totp_secret", None):
             return Response({"detail": "MFA not setup"}, status=status.HTTP_400_BAD_REQUEST)
 
         totp = pyotp.TOTP(user.totp_secret)
@@ -82,5 +102,5 @@ class MFAVerifyView(APIView):
             user.is_mfa_enabled = True
             user.is_mfa_verified = True
             user.save()
-            return Response({"detail": "MFA verified"}, status=status.HTTP_200_OK)
-        return Response({"detail": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": True, "role": getattr(user, "role", None)}, status=status.HTTP_200_OK)
+        return Response({"success": False, "error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)

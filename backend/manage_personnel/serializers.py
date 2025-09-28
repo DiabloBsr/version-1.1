@@ -1,10 +1,71 @@
 from rest_framework import serializers
-from .models import Profile, Personnel, BankAccount
+from .models import Profile, Personnel, BankAccount, User
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """Permet de lire / modifier quelques champs de l'utilisateur."""
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "phone_number",
+            "is_mfa_enabled",
+            "preferred_2fa",
+        ]
+        read_only_fields = ["id"]
+
 
 class ProfileSerializer(serializers.ModelSerializer):
+    """Sérialiseur du profil.
+    - expose `role` et `mfa_enabled` calculés
+    - accepte un sous-objet `user` pour mettre à jour certains champs utilisateur
+    - gère le champ photo si présent
+    """
+    role = serializers.SerializerMethodField(read_only=True)
+    mfa_enabled = serializers.SerializerMethodField(read_only=True)
+    user = UserSerializer(required=False)
+
     class Meta:
         model = Profile
         fields = "__all__"
+        read_only_fields = ("id", "created_at")
+
+    def get_role(self, obj):
+        user = getattr(obj, "user", None)
+        return "admin" if (user and user.is_superuser) else "user"
+
+    def get_mfa_enabled(self, obj):
+        user = getattr(obj, "user", None)
+        return bool(getattr(user, "is_mfa_enabled", False))
+
+    def update(self, instance, validated_data):
+        # Extraire les données utilisateur imbriquées (si présentes)
+        user_data = validated_data.pop("user", None)
+
+        # Mettre à jour les champs du profil (partial update supporté)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Mettre à jour l'utilisateur lié si on a des données et si le profile.user existe
+        if user_data and instance.user:
+            for attr, value in user_data.items():
+                if attr == "id":
+                    continue
+                setattr(instance.user, attr, value)
+            instance.user.save()
+
+        return instance
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        # Normaliser les chaînes vides en null pour une API plus propre
+        for key, value in list(rep.items()):
+            if value == "":
+                rep[key] = None
+        return rep
 
 
 class PersonnelSerializer(serializers.ModelSerializer):

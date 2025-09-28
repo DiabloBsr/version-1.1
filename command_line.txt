@@ -1,35 +1,6 @@
-
-
-
-#2-Obtenir tokkens (login)
-$tokens = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/token/" -ContentType "application/json" -Body (@{ email="test@example.com"; password="StrongPass123" } | ConvertTo-Json)
-$access = $tokens.access
-
-#3-Appeler setup (récupère provisioning_uri)
-$response = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/auth/mfa/setup/" -Headers @{ Authorization = "Bearer $access" } -ContentType "application/json"
-$response.provisioning_uri
-python manage.py shell -c "from django.contrib.auth import get_user_model; print(get_user_model().objects.get(email='test@example.com').totp_secret)"
-
-4- Option A — scanner le provisioning_uri dans Google Authenticator / Authy (QR ou entrée manuelle) puis noter le code affiché.
-4- Option B — générer le code localement (utile pour tests automatisés)
-# récupérer le secret stocké en base
-python manage.py shell -c "from django.contrib.auth import get_user_model; print(get_user_model().objects.get(email='test@example.com').totp_secret)"
-# puis générer le code (nécessite pyotp)
-python - <<'PY'
-import pyotp,sys
-secret=sys.stdin.read().strip()
-print(pyotp.TOTP(secret).now())
-PY
-
-5- Vérifier l’OTP via l’endpoint verify
-$otp = "<code_obtenu>"
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/auth/mfa/verify/" -Headers @{ Authorization = "Bearer $access" } -ContentType "application/json" -Body (@{ otp = $otp } | ConvertTo-Json)
-
-6 - verification en base
-python manage.py shell -c "from django.contrib.auth import get_user_model; u=get_user_model().objects.get(email='test@example.com'); print(u.totp_secret,u.is_mfa_verified)"
-
-
-
-test
-$env:DJANGO_SETTINGS_MODULE = "core.settings"
-python -m pytest .\accounts\tests\test_mfa_opt.py -q
+andry.rakoto@example.com
+    TmpPass!2025
+marie.rasoa@example.com
+    AutreMotFort123!
+jean.dupont@example.com
+    MotDePasseSecurise2025!

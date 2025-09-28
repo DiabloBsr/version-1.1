@@ -1,16 +1,18 @@
 import 'package:flutter/widgets.dart';
 import 'auth_state.dart';
 
+/// AuthProvider implemented as InheritedNotifier so widgets depending on it
+/// rebuild when AuthState.notifyListeners() is called.
 class AuthProvider extends InheritedNotifier<AuthState> {
   const AuthProvider({
-    super.key,
-    required AuthState notifier,
+    required AuthState authState,
     required Widget child,
-  }) : super(notifier: notifier, child: child);
+    super.key,
+  }) : super(notifier: authState, child: child);
 
   static AuthState of(BuildContext context) {
     final provider = context.dependOnInheritedWidgetOfExactType<AuthProvider>();
-    assert(provider != null, 'AuthProvider non trouvé dans le contexte');
-    return provider!.notifier!;
+    if (provider == null) throw StateError('AuthProvider not found');
+    return provider.notifier!;
   }
 }

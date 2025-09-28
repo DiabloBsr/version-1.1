@@ -18,13 +18,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final lastCtrl = TextEditingController();
   bool loading = false;
 
-  /// Vérifie que l'email est valide
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[^@]+@[^@]+\.[^@]+');
     return regex.hasMatch(email);
   }
 
-  /// Vérifie que le mot de passe est fort
   bool _isStrongPassword(String password) {
     return password.length >= 8 &&
         RegExp(r'[A-Z]').hasMatch(password) &&
@@ -33,7 +31,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> handleRegister() async {
-    // Validation côté client
     if (emailCtrl.text.isEmpty ||
         usernameCtrl.text.isEmpty ||
         passCtrl.text.isEmpty ||
@@ -45,9 +42,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
     if (!_isValidEmail(emailCtrl.text)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Email invalide")),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Email invalide")));
       return;
     }
     if (!_isStrongPassword(passCtrl.text)) {
@@ -77,8 +73,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (res.statusCode == 201 || res.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Compte créé avec succès ✅')),
-        );
+            const SnackBar(content: Text('Compte créé avec succès ✅')));
         context.go('/login');
       } else {
         final error = jsonDecode(res.body);
@@ -94,14 +89,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
             message = error.toString();
           }
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Échec de connexion: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Échec de connexion: $e')));
     }
     setState(() => loading = false);
   }
@@ -115,34 +108,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
         child: ListView(
           children: [
             TextField(
-              controller: emailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Email'),
-            ),
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Email')),
             TextField(
-              controller: usernameCtrl,
-              decoration: const InputDecoration(labelText: 'Nom d’utilisateur'),
-            ),
+                controller: usernameCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Nom d’utilisateur')),
             TextField(
-              controller: passCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Mot de passe'),
-            ),
+                controller: passCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Mot de passe')),
             TextField(
-              controller: firstCtrl,
-              decoration: const InputDecoration(labelText: 'Prénom'),
-            ),
+                controller: firstCtrl,
+                decoration: const InputDecoration(labelText: 'Prénom')),
             TextField(
-              controller: lastCtrl,
-              decoration: const InputDecoration(labelText: 'Nom'),
-            ),
+                controller: lastCtrl,
+                decoration: const InputDecoration(labelText: 'Nom')),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: loading ? null : handleRegister,
-              child: loading
-                  ? const CircularProgressIndicator()
-                  : const Text('Créer le compte'),
-            ),
+                onPressed: loading ? null : handleRegister,
+                child: loading
+                    ? const CircularProgressIndicator()
+                    : const Text('Créer le compte')),
           ],
         ),
       ),

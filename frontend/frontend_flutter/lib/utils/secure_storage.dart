@@ -1,22 +1,55 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Classe utilitaire pour gérer le stockage sécurisé (tokens, préférences sensibles, etc.)
 class SecureStorage {
-  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  // Instance unique de FlutterSecureStorage
+  static const FlutterSecureStorage _secure = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true, // ✅ stockage chiffré sur Android
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock, // ✅ iOS Keychain
+    ),
+  );
 
+  /// Écrit une valeur sécurisée
   static Future<void> write(String key, String value) async {
-    await _storage.write(key: key, value: value);
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, value);
+    } else {
+      await _secure.write(key: key, value: value);
+    }
   }
 
+  /// Lit une valeur sécurisée
   static Future<String?> read(String key) async {
-    return await _storage.read(key: key);
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(key);
+    } else {
+      return await _secure.read(key: key);
+    }
   }
 
+  /// Supprime une clé spécifique
   static Future<void> delete(String key) async {
-    await _storage.delete(key: key);
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(key);
+    } else {
+      await _secure.delete(key: key);
+    }
   }
 
+  /// Supprime toutes les clés
   static Future<void> deleteAll() async {
-    await _storage.deleteAll();
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } else {
+      await _secure.deleteAll();
+    }
   }
 }

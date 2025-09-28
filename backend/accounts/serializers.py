@@ -1,13 +1,8 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from rest_framework import serializers
 
 User = get_user_model()
 
-
-class TOTPSetupSerializer(serializers.Serializer):
-    otp = serializers.CharField(write_only=True, required=False)
-    provisioning_uri = serializers.CharField(read_only=True)
 
 class TOTPVerifySerializer(serializers.Serializer):
     otp = serializers.CharField(write_only=True)
