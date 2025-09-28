@@ -1,0 +1,30 @@
+# Flutter
+/build/
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-deps
+
+# Android / iOS
+/android/.gradle/
+/ios/Pods/
+/**/*.iml
+
+# Django / Python
+*.pyc
+__pycache__/
+env/
+venv/
+*.sqlite3
+/staticfiles/
+media/
+
+# Secrets
+.env
+*.keystore
+*.p12
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
