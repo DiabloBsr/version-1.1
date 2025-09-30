@@ -68,6 +68,12 @@ class Profile(models.Model):
         ("veuf", "Veuf(ve)"),
         ("divorce", "Divorcé(e)"),
     )
+    prefs = models.JSONField(default=dict)
+    ROLE_CHOICES = (
+        ("admin", "Administrateur"),
+        ("user", "Utilisateur"),
+        ("manager", "Gestionnaire"),
+    )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
@@ -92,6 +98,14 @@ class Profile(models.Model):
     email = models.EmailField(blank=True)
     adresse = models.TextField(blank=True)
 
+    # ✅ Rôle ajouté ici
+    role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default="user",
+        help_text="Rôle de l'utilisateur pour la navigation et les permissions",
+    )
+
     # Photo de profil
     photo = models.ImageField(
         upload_to="profiles/",
@@ -109,8 +123,12 @@ class Profile(models.Model):
             return None
         today = date.today()
         return (
-            today.year - self.date_naissance.year
-            - ((today.month, today.day) < (self.date_naissance.month, self.date_naissance.day))
+            today.year
+            - self.date_naissance.year
+            - (
+                (today.month, today.day)
+                < (self.date_naissance.month, self.date_naissance.day)
+            )
         )
 
     def anniversaire_est_proche(self, jours=7):

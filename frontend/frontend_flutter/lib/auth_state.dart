@@ -1,5 +1,7 @@
-// lib/auth_state.dart
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
 import 'utils/secure_storage.dart';
 
 class AuthState extends ChangeNotifier {
@@ -25,7 +27,9 @@ class AuthState extends ChangeNotifier {
     userEmail = await SecureStorage.read('email');
 
     debugPrint(
-        '[AuthState] initFromStorage loggedIn=$loggedIn otpVerified=$otpVerified role=$role mfaEnabled=$mfaEnabled userEmail=$userEmail');
+      '[AuthState] initFromStorage loggedIn=$loggedIn otpVerified=$otpVerified role=$role mfaEnabled=$mfaEnabled userEmail=$userEmail',
+    );
+
     notifyListeners();
   }
 
@@ -87,7 +91,34 @@ class AuthState extends ChangeNotifier {
     } else {
       await SecureStorage.write('email', email);
       debugPrint('[AuthState] setUserEmail -> $email');
+      await _createProfileIfNeeded(email);
     }
     notifyListeners();
+  }
+
+  Future<void> _createProfileIfNeeded(String email) async {
+    final accessToken = await SecureStorage.read('access');
+    if (accessToken == null || accessToken.isEmpty) return;
+
+    final url = Uri.parse('https://your-backend.com/api/profile/');
+    final headers = {
+      'Authorization': 'Bearer $accessToken',
+      'Content-Type': 'application/json',
+    };
+    final body = jsonEncode({'email': email});
+
+    try {
+      final response = await http.post(url, headers: headers, body: body);
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        debugPrint('[AuthState] Profile created for $email');
+      } else if (response.statusCode == 409) {
+        debugPrint('[AuthState] Profile already exists for $email');
+      } else {
+        debugPrint(
+            '[AuthState] Profile creation failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('[AuthState] Profile creation error: $e');
+    }
   }
 }
