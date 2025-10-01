@@ -1,259 +1,160 @@
 // lib/screens/settings_screen.dart
-import 'dart:io'
-    show File; // File n'existe pas sur web, mais on le garde pour mobile
-import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-
-import '../services/user_service.dart';
+import 'package:go_router/go_router.dart';
+import '../services/auth_service.dart';
+import '../utils/secure_storage.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({Key? key}) : super(key: key);
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  File? _profileImage; // utilisé sur mobile
-  Uint8List? _webImage; // utilisé sur web
-  bool _mfaEnabled = false;
+  bool _loading = true;
+  bool _darkMode = false;
+  String? _email;
+  String? _role;
 
-  /// Sélection d'une image (web ou mobile)
-  Future<void> _pickImage() async {
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
     try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          // Sur web, on lit les bytes directement
-          final bytes = await pickedFile.readAsBytes();
-          setState(() {
-            _webImage = bytes;
-            _profileImage = null;
-          });
-          await UserService.uploadProfilePhotoWeb(bytes);
-        } else {
-          // Sur mobile, on utilise File
-          final file = File(pickedFile.path);
-          setState(() {
-            _profileImage = file;
-            _webImage = null;
-          });
-          await UserService.uploadProfilePhoto(file);
-        }
-        _showSnack("Photo mise à jour avec succès");
-      }
+      _email = await SecureStorage.read('email');
+      _role = await SecureStorage.read('role');
+      // Lightweight theme inference: store theme in storage if you have one
+      final theme = await SecureStorage.read('dark_mode');
+      _darkMode = theme == 'true';
     } catch (e) {
-      _showSnack("Erreur lors de l'upload: $e");
+      debugPrint('Settings load error: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  Future<void> _toggleDarkMode(bool value) async {
+    setState(() => _darkMode = value);
+    try {
+      await SecureStorage.write('dark_mode', value ? 'true' : 'false');
+    } catch (e) {
+      debugPrint('Failed saving theme: $e');
+    }
+    // Optionally notify app theme change via some app-level mechanism
   }
 
-  // --- Dialogues pour infos, mot de passe, MFA (inchangés) ---
-  Future<void> _editInfoDialog() async {
-    final nom = TextEditingController();
-    final prenom = TextEditingController();
-    final email = TextEditingController();
-
-    final ok = await showDialog<bool>(
+  Future<void> _clearCache() async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Modifier mes informations"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: nom,
-                decoration: const InputDecoration(labelText: "Nom")),
-            TextField(
-                controller: prenom,
-                decoration: const InputDecoration(labelText: "Prénom")),
-            TextField(
-                controller: email,
-                decoration: const InputDecoration(labelText: "Email")),
-          ],
-        ),
+        title: const Text('Confirmer'),
+        content:
+            const Text('Supprimer les données locales de l\'application ?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Annuler")),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Enregistrer")),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Supprimer')),
         ],
       ),
     );
+    if (confirmed != true) return;
 
-    if (ok == true) {
-      try {
-        await UserService.updateProfile({
-          "nom": nom.text,
-          "prenom": prenom.text,
-          "user": {"email": email.text}
-        });
-        _showSnack("Informations mises à jour");
-      } catch (e) {
-        _showSnack("Erreur: $e");
-      }
-    }
-  }
-
-  Future<void> _changePasswordDialog() async {
-    final oldPwd = TextEditingController();
-    final newPwd = TextEditingController();
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Changer le mot de passe"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: oldPwd,
-                decoration:
-                    const InputDecoration(labelText: "Ancien mot de passe"),
-                obscureText: true),
-            TextField(
-                controller: newPwd,
-                decoration:
-                    const InputDecoration(labelText: "Nouveau mot de passe"),
-                obscureText: true),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Annuler")),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Changer")),
-        ],
-      ),
-    );
-
-    if (ok == true) {
-      try {
-        await UserService.changePassword(oldPwd.text, newPwd.text);
-        _showSnack("Mot de passe mis à jour");
-      } catch (e) {
-        _showSnack("Erreur: $e");
-      }
-    }
-  }
-
-  Future<void> _toggleMFA(bool val) async {
     try {
-      await UserService.setMFA(enabled: val);
-      setState(() => _mfaEnabled = val);
-      _showSnack("MFA ${val ? 'activé' : 'désactivé'}");
+      await SecureStorage.delete('access');
+      await SecureStorage.delete('refresh');
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Données locales supprimées')));
     } catch (e) {
-      _showSnack("Erreur MFA: $e");
+      debugPrint('Clear cache error: $e');
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Erreur: $e')));
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await AuthService.logout();
+    } catch (e) {
+      debugPrint('Logout error: $e');
+    } finally {
+      // clear storage minimally and navigate to login
+      try {
+        await SecureStorage.delete('access');
+        await SecureStorage.delete('refresh');
+        await SecureStorage.delete('email');
+        await SecureStorage.delete('role');
+      } catch (_) {}
+      if (mounted) context.go('/login');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    ImageProvider? avatar;
-    if (_profileImage != null) {
-      avatar = FileImage(_profileImage!);
-    } else if (_webImage != null) {
-      avatar = MemoryImage(_webImage!);
-    } else {
-      avatar = const AssetImage("assets/profile_placeholder.png");
-    }
-
     return Scaffold(
-      appBar: AppBar(title: const Text("Paramètres")),
-      body: ListView(
-        children: [
-          // --- Profil utilisateur avec photo ---
-          Center(
-            child: Column(
-              children: [
-                const SizedBox(height: 20),
-                CircleAvatar(radius: 50, backgroundImage: avatar),
-                const SizedBox(height: 10),
-                ElevatedButton.icon(
-                  onPressed: _pickImage,
-                  icon: const Icon(Icons.photo_camera),
-                  label: const Text("Changer la photo"),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-
-          // --- Informations utilisateur ---
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text("Modifier mes informations"),
-            onTap: _editInfoDialog,
-          ),
-          ListTile(
-            leading: const Icon(Icons.lock),
-            title: const Text("Changer le mot de passe"),
-            onTap: _changePasswordDialog,
-          ),
-          const Divider(),
-
-          // --- Sécurité ---
-          const Padding(
-            padding: EdgeInsets.all(12.0),
-            child: Text("Sécurité",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
-          SwitchListTile(
-            title: const Text("Activer OTP"),
-            subtitle: const Text("Authentification à deux facteurs"),
-            value: _mfaEnabled,
-            onChanged: _toggleMFA,
-          ),
-          const Divider(),
-
-          // --- Préférences ---
-          const Padding(
-            padding: EdgeInsets.all(12.0),
-            child: Text("Préférences",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
-          ListTile(
-            leading: const Icon(Icons.language),
-            title: const Text("Langue"),
-            subtitle: const Text("Français"),
-            onTap: () => _showSnack("Sélecteur de langue à implémenter"),
-          ),
-          SwitchListTile(
-            title: const Text("Mode sombre"),
-            value: false,
-            onChanged: (val) => _showSnack("Mode sombre à implémenter"),
-          ),
-          SwitchListTile(
-            title: const Text("Notifications"),
-            value: true,
-            onChanged: (val) => _showSnack("Notifications à implémenter"),
-          ),
-          const Divider(),
-
-          // --- Support ---
-          ListTile(
-            leading: const Icon(Icons.feedback),
-            title: const Text("Envoyer une suggestion"),
-            onTap: () => _showSnack("Formulaire de feedback à implémenter"),
-          ),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text("Déconnexion"),
-            onTap: () => _showSnack("Déconnexion à implémenter"),
-          ),
+      appBar: AppBar(
+        title: const Text('Paramètres'),
+        actions: [
+          IconButton(onPressed: _loadSettings, icon: const Icon(Icons.refresh)),
         ],
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.person),
+                        title: Text(_email ?? 'Non connecté'),
+                        subtitle: Text('Rôle: ${_role ?? "—"}'),
+                      ),
+                      const Divider(),
+                      SwitchListTile(
+                        value: _darkMode,
+                        onChanged: _toggleDarkMode,
+                        title: const Text('Mode sombre'),
+                        secondary: const Icon(Icons.brightness_6),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.lock),
+                        title: const Text('Sécurité'),
+                        subtitle: const Text('Gérer MFA et mots de passe'),
+                        onTap: () => context.go('/mfa-setup'),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.payment),
+                        title: const Text('Comptes bancaires'),
+                        onTap: () => context.go('/profile-extra'),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.delete_forever),
+                        label: const Text('Supprimer les données locales'),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.shade700),
+                        onPressed: _clearCache,
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.logout),
+                        label: const Text('Se déconnecter'),
+                        onPressed: _signOut,
+                      ),
+                    ]),
+              ),
+            ),
     );
   }
 }

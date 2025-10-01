@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "accounts",
     "manage_personnel",
     "dashboard",
+    "activities",
 ]
 
 # Middleware (ensure corsmiddleware is placed early)

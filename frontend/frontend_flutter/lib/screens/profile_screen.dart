@@ -1,22 +1,23 @@
-import 'dart:io';
+// lib/screens/profile_screen.dart
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:go_router/go_router.dart';
 import '../services/auth_service.dart';
-import '../widgets/app_drawer.dart';
+import '../utils/secure_storage.dart';
+import 'package:http/http.dart' as http;
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({Key? key}) : super(key: key);
+
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _nom = TextEditingController();
-  final _prenom = TextEditingController();
-  final _email = TextEditingController();
-  File? _image;
-  bool _loading = false;
+  bool _loading = true;
+  Map<String, dynamic>? _profile;
+  Uint8List? _photoBytes;
+  String? _email;
 
   @override
   void initState() {
@@ -24,112 +25,210 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadProfile();
   }
 
-  @override
-  void dispose() {
-    _nom.dispose();
-    _prenom.dispose();
-    _email.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadProfile() async {
-    final profile = await AuthService.getProfile();
-    if (profile != null) {
-      // adapte les clés selon la réponse de ton backend
-      _nom.text = (profile['nom'] ?? profile['first_name'] ?? '') as String;
-      _prenom.text =
-          (profile['prenom'] ?? profile['last_name'] ?? '') as String;
-      _email.text = (profile['email'] ?? '') as String;
-      setState(() {});
-    }
-  }
-
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final res =
-        await picker.pickImage(source: ImageSource.gallery, maxWidth: 800);
-    if (res != null) setState(() => _image = File(res.path));
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
-
-    final success = await AuthService.updateProfile(
-      nom: _nom.text.trim(),
-      prenom: _prenom.text.trim(),
-      email: _email.text.trim(),
-      photoFile: _image,
-    );
-
     if (!mounted) return;
-    setState(() => _loading = false);
+    setState(() {
+      _loading = true;
+      _photoBytes = null;
+    });
 
-    if (success == true) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Profil mis à jour')));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Échec mise à jour'),
-        backgroundColor: Colors.red,
-      ));
+    try {
+      _email = await SecureStorage.read('email');
+      final p = await AuthService.getProfile();
+      if (p != null && mounted) setState(() => _profile = p);
+
+      final access = await SecureStorage.read('access');
+      final photoPath = _resolvePhotoPath(_profile);
+      if (photoPath != null && access != null) {
+        final url = _absolutePhotoUrl(photoPath);
+        try {
+          final resp = await http.get(
+            Uri.parse(url),
+            headers: <String, String>{
+              'Authorization': 'Bearer $access',
+              'Accept': 'application/octet-stream'
+            },
+          ).timeout(const Duration(seconds: 10));
+          if (resp.statusCode == 200 && mounted)
+            setState(() => _photoBytes = resp.bodyBytes);
+        } catch (_) {
+          // ignore and fallback to network image or initials
+        }
+      }
+    } catch (e, st) {
+      debugPrint('ProfileScreen _loadProfile error: $e\n$st');
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Impossible de charger le profil')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String? _resolvePhotoPath(Map<String, dynamic>? profile) {
+    if (profile == null) return null;
+    return profile['photo'] as String? ??
+        (profile['user'] is Map ? profile['user']['photo'] as String? : null);
+  }
+
+  String _absolutePhotoUrl(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    final apiBase = AuthService.apiBase;
+    const apiSuffix = '/api/v1';
+    String root = apiBase;
+    if (apiBase.endsWith(apiSuffix))
+      root = apiBase.substring(0, apiBase.length - apiSuffix.length);
+    return '$root${path.startsWith('/') ? '' : '/'}$path';
+  }
+
+  Widget _avatar(double radius) {
+    final first = (_profile?['prenom'] as String?)?.trim() ?? '';
+    final last = (_profile?['nom'] as String?)?.trim() ?? '';
+    final name = [first, last].where((s) => s.isNotEmpty).join(' ');
+    final initials = name.isNotEmpty
+        ? name.split(' ').map((s) => s[0]).join().toUpperCase()
+        : ((_profile?['user']?['email'] as String?) ?? _email ?? 'U')[0]
+            .toUpperCase();
+
+    if (_photoBytes != null) {
+      return CircleAvatar(
+          radius: radius,
+          backgroundImage: MemoryImage(_photoBytes!),
+          backgroundColor: Colors.grey.shade100);
+    }
+
+    final path = _resolvePhotoPath(_profile);
+    if (path != null) {
+      return CircleAvatar(
+          radius: radius,
+          backgroundImage: NetworkImage(_absolutePhotoUrl(path)),
+          backgroundColor: Colors.grey.shade100);
+    }
+
+    return CircleAvatar(
+        radius: radius,
+        backgroundColor: Colors.blue.shade700,
+        child: Text(initials,
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w700)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Mon profil')),
-      drawer: const AppDrawer(),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              GestureDetector(
-                onTap: _pickImage,
-                child: CircleAvatar(
-                  radius: 48,
-                  child: _image == null ? const Icon(Icons.camera_alt) : null,
-                  backgroundImage: _image != null ? FileImage(_image!) : null,
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _nom,
-                decoration: const InputDecoration(labelText: 'Nom'),
-                validator: (v) => v == null || v.isEmpty ? 'Requis' : null,
-              ),
-              TextFormField(
-                controller: _prenom,
-                decoration: const InputDecoration(labelText: 'Prénom'),
-                validator: (v) => v == null || v.isEmpty ? 'Requis' : null,
-              ),
-              TextFormField(
-                controller: _email,
-                decoration: const InputDecoration(labelText: 'Email'),
-                keyboardType: TextInputType.emailAddress,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Requis';
-                  final regex = RegExp(r'^[^@]+@[^@]+\.[^@]+');
-                  if (!regex.hasMatch(v)) return 'Email invalide';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _loading ? null : _save,
-                child: _loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Enregistrer'),
-              ),
-            ],
+      appBar: AppBar(
+        title: const Text('Profil'),
+        actions: [
+          IconButton(
+              onPressed: _loadProfile,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Rafraîchir'),
+          IconButton(
+            onPressed: () async {
+              // push edit screen and refresh after return
+              await context.push('/profile/edit');
+              await _loadProfile();
+            },
+            icon: const Icon(Icons.edit),
+            tooltip: 'Éditer',
           ),
-        ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                            color: theme.cardColor,
+                            borderRadius: BorderRadius.circular(12)),
+                        child: Row(children: [
+                          _avatar(40),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ((_profile?['prenom'] as String?)?.trim() ??
+                                            '') +
+                                        ' ' +
+                                        ((_profile?['nom'] as String?)
+                                                ?.trim() ??
+                                            ''),
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                      (_profile?['user']?['email']
+                                              as String?) ??
+                                          _profile?['email'] as String? ??
+                                          _email ??
+                                          '',
+                                      style: TextStyle(
+                                          color: theme
+                                              .textTheme.bodyMedium?.color
+                                              ?.withOpacity(0.9))),
+                                  const SizedBox(height: 8),
+                                  Wrap(spacing: 8, children: [
+                                    Chip(
+                                        label: Text(
+                                            ((_profile?['role'] as String?) ??
+                                                    'user')
+                                                .toUpperCase()),
+                                        backgroundColor: Colors.blue.shade50),
+                                  ]),
+                                ]),
+                          ),
+                        ]),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildDetailTile(
+                          'Téléphone', _profile?['telephone'] as String?),
+                      _buildDetailTile(
+                          'Adresse', _profile?['adresse'] as String?),
+                      _buildDetailTile('Date de naissance',
+                          _profile?['date_naissance'] as String?),
+                      _buildDetailTile('Lieu de naissance',
+                          _profile?['lieu_naissance'] as String?),
+                      _buildDetailTile('Nombre d\'enfants',
+                          _profile?['nombre_enfants']?.toString()),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          await context.push('/profile/edit');
+                          await _loadProfile();
+                        },
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Modifier mon profil'),
+                      ),
+                    ]),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildDetailTile(String label, String? value) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(value ?? 'Non fourni',
+            style: TextStyle(
+                color: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.color
+                    ?.withOpacity(0.85))),
       ),
     );
   }

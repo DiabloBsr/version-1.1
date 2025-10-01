@@ -1,5 +1,7 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'auth_state.dart';
 import 'auth_provider.dart';
@@ -8,6 +10,14 @@ import 'services/auth_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize app version for UI
+  try {
+    final info = await PackageInfo.fromPlatform();
+    AuthService.appVersion = '${info.version}+${info.buildNumber}';
+  } catch (_) {
+    AuthService.appVersion = null;
+  }
 
   final authState = AuthState();
   await authState.initFromStorage();
@@ -45,7 +55,7 @@ class MyApp extends StatelessWidget {
       title: 'HR App',
       routerConfig: router,
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system, // Utilise le thème système par défaut
+      themeMode: ThemeMode.system,
 
       // LIGHT THEME
       theme: ThemeData(

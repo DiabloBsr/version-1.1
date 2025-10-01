@@ -18,14 +18,22 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class ProfileSerializer(serializers.ModelSerializer):
-    """Sérialiseur du profil.
+    """
+    Sérialiseur du profil.
     - expose `role` et `mfa_enabled` calculés
     - accepte un sous-objet `user` pour mettre à jour certains champs utilisateur
     - gère le champ photo si présent
+    - attache automatiquement request.user si présent dans le contexte
     """
+
     role = serializers.SerializerMethodField(read_only=True)
     mfa_enabled = serializers.SerializerMethodField(read_only=True)
-    user = UserSerializer(required=False)
+    user = UserSerializer(required=False, allow_null=True)
+    date_naissance = serializers.DateField(
+        required=False,
+        allow_null=True,
+        input_formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%S"],
+    )
 
     class Meta:
         model = Profile
@@ -40,16 +48,51 @@ class ProfileSerializer(serializers.ModelSerializer):
         user = getattr(obj, "user", None)
         return bool(getattr(user, "is_mfa_enabled", False))
 
+    def create(self, validated_data):
+        """
+        Create a Profile. If request.user is authenticated, attach or update that user's profile.
+        Nested 'user' data will update the existing user but will not create a new User.
+        """
+        user_data = validated_data.pop("user", None)
+        request = self.context.get("request", None)
+
+        if request and getattr(request, "user", None) and request.user.is_authenticated:
+            user = request.user
+            existing = Profile.objects.filter(user=user).first()
+            if existing:
+                for attr, val in validated_data.items():
+                    setattr(existing, attr, val)
+                existing.save()
+                if user_data:
+                    for k, v in user_data.items():
+                        if k == "id":
+                            continue
+                        setattr(user, k, v)
+                    user.save()
+                return existing
+
+            instance = Profile.objects.create(user=user, **validated_data)
+            if user_data:
+                for k, v in user_data.items():
+                    if k == "id":
+                        continue
+                    setattr(user, k, v)
+                user.save()
+            return instance
+
+        # No authenticated user in context: allow creation without linking user
+        return Profile.objects.create(**validated_data)
+
     def update(self, instance, validated_data):
-        # Extraire les données utilisateur imbriquées (si présentes)
+        """
+        Update profile fields and optionally nested user fields.
+        """
         user_data = validated_data.pop("user", None)
 
-        # Mettre à jour les champs du profil (partial update supporté)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # Mettre à jour l'utilisateur lié si on a des données et si le profile.user existe
         if user_data and instance.user:
             for attr, value in user_data.items():
                 if attr == "id":
@@ -61,7 +104,6 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
-        # Normaliser les chaînes vides en null pour une API plus propre
         for key, value in list(rep.items()):
             if value == "":
                 rep[key] = None
