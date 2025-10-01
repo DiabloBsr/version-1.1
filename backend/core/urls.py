@@ -10,20 +10,23 @@ urlpatterns = [
     # API de gestion du personnel
     path(
         "api/v1/",
-        include(("manage_personnel.urls", "manage_personnel"), namespace="manage_personnel")
+        include(("manage_personnel.urls", "manage_personnel"), namespace="manage_personnel"),
     ),
+
+    # Activities API
+    path("api/v1/", include(("activities.urls", "activities"), namespace="activities")),
 
     # Authentification (custom + Djoser)
     path("api/v1/auth/", include(("accounts.urls", "accounts"), namespace="accounts")),
     path("api/v1/auth/", include("djoser.urls")),
     path("api/v1/auth/", include("djoser.urls.jwt")),
 
-    # JWT tokens (optionnel si tu veux garder des endpoints simples en plus de Djoser)
+    # JWT tokens (endpoints alternatifs)
     path("api/v1/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/v1/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # Tableau de bord RH
-    path("api/v1/dashboard/", include("dashboard.urls")),
+    path("api/v1/dashboard/", include(("dashboard.urls", "dashboard"), namespace="dashboard")),
 ]
 
 # Serve media files in development

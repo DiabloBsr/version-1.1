@@ -1,4 +1,3 @@
-// lib/services/auth_service.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -244,6 +243,7 @@ class AuthService {
     return null;
   }
 
+  /// Verify MFA OTP. Returns map with success flag or error detail.
   static Future<Map<String, dynamic>> verifyMFA(String otp) async {
     try {
       final res = await http
@@ -600,6 +600,40 @@ class AuthService {
       debugPrint('[AuthService] postActivity error: $e\n$st');
     }
     return false;
+  }
+
+  /// POST a batch of activities to the server.
+  /// Payload: { "activities": [ {...}, ... ] }
+  /// Returns decoded server response map or null on failure.
+  static Future<Map<String, dynamic>?> postActivitiesBatch(
+      List<Map<String, dynamic>> activities) async {
+    final token = (await SecureStorage.read('access'))?.trim();
+    if (token == null || token.isEmpty) return null;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$apiBase/activities/batch/'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: jsonEncode({'activities': activities}),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      } else if (resp.statusCode == 401) {
+        final refreshed = await refreshTokens();
+        if (refreshed) return postActivitiesBatch(activities);
+      } else {
+        debugPrint(
+            '[AuthService] postActivitiesBatch failed: ${resp.statusCode} ${resp.body}');
+      }
+    } catch (e, st) {
+      debugPrint('[AuthService] postActivitiesBatch error: $e\n$st');
+    }
+    return null;
   }
 
   /// Fetch activities for current user. Uses /activities/ endpoint with optional query params.
