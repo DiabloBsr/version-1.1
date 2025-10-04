@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "dashboard",
     "activities",
     "bank_accounts",
+
 ]
 
 MIDDLEWARE = [
