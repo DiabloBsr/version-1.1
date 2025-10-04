@@ -1,11 +1,12 @@
+# manage_personnel/urls.py
 from rest_framework.routers import DefaultRouter
-from .views import ProfileViewSet, PersonnelViewSet, BankAccountViewSet
-
-app_name = "manage_personnel"
+from django.urls import path, include
+from .views import ProfileViewSet, PersonnelViewSet
 
 router = DefaultRouter()
 router.register(r"profiles", ProfileViewSet, basename="profile")
 router.register(r"personnel", PersonnelViewSet, basename="personnel")
-router.register(r"bank-accounts", BankAccountViewSet, basename="bankaccount")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("", include(router.urls)),
+]

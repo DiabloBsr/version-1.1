@@ -6,13 +6,11 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import FileExtensionValidator
 
-
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(_("email address"), unique=True)
     phone_number = models.CharField(max_length=25, blank=True, null=True, unique=True)
 
-    # Champs MFA
     is_mfa_enabled = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=64, null=True, blank=True)
     is_mfa_verified = models.BooleanField(default=False)
@@ -33,7 +31,6 @@ class User(AbstractUser):
 
     @property
     def full_name(self):
-        """Retourne le nom complet depuis le profil si disponible."""
         if hasattr(self, "profile") and self.profile is not None:
             nom = (self.profile.nom or "").strip()
             prenom = (self.profile.prenom or "").strip()
@@ -42,13 +39,11 @@ class User(AbstractUser):
         return self.username
 
     def enable_mfa(self, method="totp"):
-        """Active le MFA avec la méthode choisie."""
         self.is_mfa_enabled = True
         self.preferred_2fa = method
         self.save(update_fields=["is_mfa_enabled", "preferred_2fa"])
 
     def disable_mfa(self):
-        """Désactive complètement le MFA."""
         self.is_mfa_enabled = False
         self.totp_secret = None
         self.is_mfa_verified = False
@@ -98,7 +93,6 @@ class Profile(models.Model):
     email = models.EmailField(blank=True)
     adresse = models.TextField(blank=True)
 
-    # ✅ Rôle ajouté ici
     role = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES,
@@ -106,7 +100,6 @@ class Profile(models.Model):
         help_text="Rôle de l'utilisateur pour la navigation et les permissions",
     )
 
-    # Photo de profil
     photo = models.ImageField(
         upload_to="profiles/",
         null=True,
@@ -118,7 +111,6 @@ class Profile(models.Model):
 
     @property
     def age(self):
-        """Retourne l'âge si date_naissance est renseignée, sinon None."""
         if not self.date_naissance:
             return None
         today = date.today()
@@ -132,7 +124,6 @@ class Profile(models.Model):
         )
 
     def anniversaire_est_proche(self, jours=7):
-        """Retourne True si l'anniversaire est dans X jours, sinon False."""
         if not self.date_naissance:
             return False
         today = date.today()
@@ -178,24 +169,3 @@ class Personnel(models.Model):
 
     class Meta:
         ordering = ("-id",)
-
-
-class BankAccount(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name="bank_accounts")
-    bank_name = models.CharField(max_length=100, default="BFV")
-    bank_code = models.CharField(max_length=20)
-    organisme_code = models.CharField(max_length=20, blank=True)
-    agency = models.CharField(max_length=100, blank=True)
-    account_number = models.CharField(max_length=50)
-    rib_key = models.CharField(max_length=10, blank=True)
-    bk_code = models.CharField(max_length=10, blank=True)
-    is_primary = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = (("profile", "account_number"),)
-        ordering = ("-created_at",)
-
-    def __str__(self):
-        return f"{self.bank_name} - {self.account_number}"

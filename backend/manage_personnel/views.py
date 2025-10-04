@@ -5,12 +5,11 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
-from .models import Profile, Personnel, BankAccount
-from .serializers import ProfileSerializer, PersonnelSerializer, BankAccountSerializer
+from .models import Profile, Personnel
+from .serializers import ProfileSerializer, PersonnelSerializer
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 class ProfileViewSet(viewsets.ModelViewSet):
     queryset = Profile.objects.all()
@@ -68,7 +67,6 @@ class ProfileViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(profile)
             return Response(serializer.data)
 
-        # PUT/PATCH - create-if-missing then update
         if profile is None:
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
@@ -94,22 +92,3 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         if user and (user.is_staff or user.is_superuser):
             return qs
         return qs.filter(profile__user=user)
-
-
-class BankAccountViewSet(viewsets.ModelViewSet):
-    queryset = BankAccount.objects.all()
-    serializer_class = BankAccountSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        user = getattr(self.request, "user", None)
-        if user and (user.is_staff or user.is_superuser):
-            return qs
-        return qs.filter(profile__user=user)
-
-    def perform_create(self, serializer):
-        profile = getattr(self.request.user, "profile", None)
-        if profile is None:
-            raise ValidationError("Profil lié à l'utilisateur introuvable.")
-        serializer.save(profile=profile)
