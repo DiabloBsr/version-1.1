@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+
 import '../services/auth_service.dart';
+import '../auth_provider.dart';
 
 class MFASetupScreen extends StatefulWidget {
   const MFASetupScreen({super.key});
@@ -55,9 +57,8 @@ class _MFASetupScreenState extends State<MFASetupScreen> {
       color: Colors.white,
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: Colors.black12),
-      boxShadow: [
-        BoxShadow(
-            color: Colors.black12, blurRadius: 6, offset: const Offset(0, 3))
+      boxShadow: const [
+        BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 3))
       ],
     );
 
@@ -117,9 +118,10 @@ class _MFASetupScreenState extends State<MFASetupScreen> {
               ? () async {
                   final uri = provisioningUri!;
                   await Clipboard.setData(ClipboardData(text: uri));
-                  if (mounted)
+                  if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text("URI copié")));
+                  }
                 }
               : null,
           icon: const Icon(Icons.copy, size: 18),
@@ -150,16 +152,16 @@ class _MFASetupScreenState extends State<MFASetupScreen> {
           borderRadius: BorderRadius.circular(12),
           boxShadow: _isHoveringPrimary
               ? [
-                  BoxShadow(
+                  const BoxShadow(
                       color: Colors.black26,
                       blurRadius: 10,
-                      offset: const Offset(0, 6))
+                      offset: Offset(0, 6))
                 ]
               : [
-                  BoxShadow(
+                  const BoxShadow(
                       color: Colors.black12,
                       blurRadius: 6,
-                      offset: const Offset(0, 3))
+                      offset: Offset(0, 3))
                 ],
         ),
         child: Material(
@@ -283,15 +285,15 @@ class _MFASetupScreenState extends State<MFASetupScreen> {
                       Container(
                         width: 72,
                         height: 72,
-                        decoration: BoxDecoration(
-                            gradient: const LinearGradient(
+                        decoration: const BoxDecoration(
+                            gradient: LinearGradient(
                                 colors: [Color(0xFF4F46E5), Color(0xFF06B6D4)]),
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
                                   color: Colors.black26,
                                   blurRadius: 8,
-                                  offset: const Offset(0, 4))
+                                  offset: Offset(0, 4))
                             ]),
                         child: const Center(
                             child: Icon(Icons.phonelink_lock,
@@ -372,10 +374,27 @@ class _MFASetupScreenState extends State<MFASetupScreen> {
 
                       // Primary action is outside the scrollable region and always visible
                       _styledPrimaryButton(
-                        onTap: () => context.go('/mfa-verify'),
-                        child: Row(
+                        onTap: () async {
+                          try {
+                            // optional backend finalization:
+                            // await AuthService.completeMfaSetup();
+
+                            // Use AuthProvider to update and notify the same AuthState used by the router
+                            final authState = AuthProvider.of(context);
+                            authState.setPendingLogin(true);
+
+                            // deterministic navigation to verify screen
+                            context.go('/mfa-verify');
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Erreur: $e')));
+                            }
+                          }
+                        },
+                        child: const Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
+                            children: [
                               Icon(Icons.lock, color: Colors.white, size: 18),
                               SizedBox(width: 10),
                               Text("Continuer vers la vérification",

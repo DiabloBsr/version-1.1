@@ -4,6 +4,7 @@ Django settings for core project.
 Cleaned, consolidated and ready for development. Adjust secrets and
 production flags via the .env file.
 """
+import json
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -59,6 +60,8 @@ INSTALLED_APPS = [
     "manage_personnel",
     "dashboard",
     "activities",
+    "bank_accounts",
+
 ]
 
 # Middleware (ensure corsmiddleware is placed early)
@@ -170,3 +173,20 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 # during development ensure DEBUG True to serve media
+
+
+
+#fenet config
+FERNET_KEYS = None
+_raw = os.environ.get("FERNET_KEYS")
+if _raw:
+    try:
+        FERNET_KEYS = json.loads(_raw) if _raw.strip().startswith("[") else [_raw]
+    except Exception:
+        # fallback: single base64 key
+        FERNET_KEYS = [_raw]
+
+if not FERNET_KEYS:
+    # In dev you may set a single ephemeral key for convenience, but fail loudly in CI/prod
+    # WARNING: replace with proper secret in production
+    FERNET_KEYS = [os.environ.get("FERNET_DEV_KEY", "")]  # allow dev-only env fallback

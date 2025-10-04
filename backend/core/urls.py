@@ -16,6 +16,9 @@ urlpatterns = [
     # Activities API
     path("api/v1/", include(("activities.urls", "activities"), namespace="activities")),
 
+    # Bank accounts API
+    path("api/v1/", include(("bank_accounts.urls", "bank_accounts"), namespace="bank_accounts")),
+
     # Authentification (custom + Djoser)
     path("api/v1/auth/", include(("accounts.urls", "accounts"), namespace="accounts")),
     path("api/v1/auth/", include("djoser.urls")),

@@ -124,6 +124,15 @@ class AuthState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Setter helper pour pendingLogin qui appelle notifyListeners()
+  void setPendingLogin(bool v) {
+    if (pendingLogin != v) {
+      pendingLogin = v;
+      debugPrint('[AuthState] setPendingLogin -> $v');
+      notifyListeners();
+    }
+  }
+
   // ---- Flow two-step helpers ----
 
   /// Appelé après la première étape du login (username+password)

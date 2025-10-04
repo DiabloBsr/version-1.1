@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+
 import '../services/auth_service.dart';
 import '../auth_provider.dart';
 import '../utils/secure_storage.dart';
@@ -65,23 +66,46 @@ class _MFAVerifyScreenState extends State<MFAVerifyScreen> {
           await auth.setTokens(access, refresh);
           final stored = await SecureStorage.read('access');
           debugPrint(
-              '[MFAVerify] SecureStorage access after setTokens: ${stored != null ? stored.substring(0, 10) + "..." : "null"}');
+              '[MFAVerify] SecureStorage access after setTokens: ${stored != null ? "${stored.substring(0, 10)}..." : "null"}');
         } else {
           debugPrint(
               '[MFAVerify] no tokens in response; assume existing tokens');
         }
 
+        // mark otp and mfa state
         await auth.setOtpVerified(true);
         await auth.setMfaEnabled(true);
 
+        // update role if returned
         final apiRole = (result['role'] as String?)?.toLowerCase();
         if (apiRole != null && apiRole.isNotEmpty) {
           await auth.setRole(apiRole);
         }
 
-        // brief delay to let state settle, then navigate to root for router re-eval
+        // clear pending login state if present so router won't force /mfa-verify
+        auth.cancelPendingLogin();
+
+        // short delay to let listeners propagate
         await Future.delayed(const Duration(milliseconds: 50));
-        context.go('/');
+
+        // Determine destination by role and navigate directly
+        final role = (auth.role ?? '').toLowerCase();
+        String destination;
+        if (role == 'admin') {
+          destination = '/dashboard';
+        } else if (role == 'user') {
+          destination = '/user-home';
+        } else {
+          destination = '/home';
+        }
+
+        // Navigate only if not already on destination to avoid loops
+        if (ModalRoute.of(context)?.settings.name != destination) {
+          context.go(destination);
+        } else {
+          // ensure router re-eval by going to root then to destination if needed
+          context.go(destination);
+        }
       } else {
         final msg =
             result['error']?.toString() ?? "Code OTP invalide ou expiré.";
@@ -128,16 +152,16 @@ class _MFAVerifyScreenState extends State<MFAVerifyScreen> {
           borderRadius: BorderRadius.circular(12),
           boxShadow: _isHovering
               ? [
-                  BoxShadow(
+                  const BoxShadow(
                       color: Colors.black26,
                       blurRadius: 10,
-                      offset: const Offset(0, 6))
+                      offset: Offset(0, 6))
                 ]
               : [
-                  BoxShadow(
+                  const BoxShadow(
                       color: Colors.black12,
                       blurRadius: 6,
-                      offset: const Offset(0, 3))
+                      offset: Offset(0, 3))
                 ],
         ),
         child: Material(
@@ -218,8 +242,8 @@ class _MFAVerifyScreenState extends State<MFAVerifyScreen> {
                     Container(
                       width: 72,
                       height: 72,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
                             colors: [Color(0xFF4F46E5), Color(0xFF06B6D4)]),
                         shape: BoxShape.circle,
                         boxShadow: [
@@ -265,9 +289,7 @@ class _MFAVerifyScreenState extends State<MFAVerifyScreen> {
                       ),
                     ],
                     const SizedBox(height: 14),
-                    Row(children: [
-                      Expanded(child: _styledSubmitButton()),
-                    ]),
+                    Row(children: [Expanded(child: _styledSubmitButton())]),
                     const SizedBox(height: 10),
                     TextButton.icon(
                       icon: const Icon(Icons.qr_code),

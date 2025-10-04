@@ -23,7 +23,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _error;
   bool _loading = true;
   String _activeRoute = '/dashboard';
-  bool _navExpanded = true;
+  final bool _navExpanded = true;
 
   @override
   void initState() {
@@ -110,7 +110,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                         color: Colors.white24, shape: BoxShape.circle),
                     child: const Icon(Icons.business,
                         color: Colors.white, size: 24),
@@ -199,7 +199,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     context.go('/login');
                   },
                   icon: const Icon(Icons.logout, color: Colors.white),
-                  label: Expanded(
+                  label: const Expanded(
                       child: Text('Se déconnecter',
                           overflow: TextOverflow.ellipsis)),
                 ),
@@ -648,7 +648,7 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final titleStyle = theme.textTheme.bodySmall
-        ?.copyWith(color: theme.colorScheme.onBackground.withOpacity(0.85));
+        ?.copyWith(color: theme.colorScheme.onSurface.withOpacity(0.85));
     final valueStyle = theme.textTheme.titleLarge
         ?.copyWith(color: color, fontWeight: FontWeight.w800, fontSize: 18);
     return Card(

@@ -20,6 +20,12 @@ dependencies:
   http_parser: ^4.0.0
 
 
+services:
+  web:
+    environment:
+      - FERNET_KEYS=["UkopL_QvrUhxcCRmupO4hXWM1pf0j2amYTHTUgTO3wA="]
+
+
   
 
 
