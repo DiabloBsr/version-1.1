@@ -1,4 +1,6 @@
 // lib/router.dart
+// ignore_for_file: unused_local_variable
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -15,6 +17,19 @@ import 'screens/profile_extra_screen.dart';
 import 'screens/profile_edit_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/support_screen.dart';
+import 'screens/bank_account_create_screen.dart';
+import 'screens/bank_account_view_screen.dart';
+import 'screens/bank_account_edit_screen.dart' as bank_edit;
+import 'screens/history_screen.dart';
+import 'services/auth_service.dart';
+
+bool _isValidUuid(String id) {
+  final uuidReg = RegExp(
+      r'^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$');
+  return uuidReg.hasMatch(id);
+}
+
+String _encodeNext(String next) => Uri.encodeComponent(next);
 
 GoRouter createRouter(AuthState authState) {
   return GoRouter(
@@ -22,65 +37,105 @@ GoRouter createRouter(AuthState authState) {
     refreshListenable: authState,
     routes: <GoRoute>[
       GoRoute(
-        path: '/login',
-        builder: (BuildContext context, GoRouterState state) =>
-            const LoginScreen(),
-      ),
+          path: '/login',
+          builder: (BuildContext context, GoRouterState state) =>
+              const LoginScreen()),
       GoRoute(
-        path: '/register',
-        builder: (BuildContext context, GoRouterState state) =>
-            const RegisterScreen(),
-      ),
+          path: '/register',
+          builder: (BuildContext context, GoRouterState state) =>
+              const RegisterScreen()),
       GoRoute(
-        path: '/profile-extra',
-        builder: (BuildContext context, GoRouterState state) =>
-            const ProfileExtraScreen(),
-      ),
+          path: '/profile-extra',
+          builder: (BuildContext context, GoRouterState state) =>
+              const ProfileExtraScreen()),
       GoRoute(
-        path: '/mfa-setup',
-        builder: (BuildContext context, GoRouterState state) =>
-            const MFASetupScreen(),
-      ),
+          path: '/mfa-setup',
+          builder: (BuildContext context, GoRouterState state) =>
+              const MFASetupScreen()),
       GoRoute(
-        path: '/mfa-verify',
-        builder: (BuildContext context, GoRouterState state) =>
-            const MFAVerifyScreen(),
-      ),
+          path: '/mfa-verify',
+          builder: (BuildContext context, GoRouterState state) =>
+              const MFAVerifyScreen()),
       GoRoute(
-        path: '/home',
-        builder: (BuildContext context, GoRouterState state) =>
-            const HomeScreen(),
-      ),
+          path: '/home',
+          builder: (BuildContext context, GoRouterState state) =>
+              const HomeScreen()),
       GoRoute(
-        path: '/dashboard',
-        builder: (BuildContext context, GoRouterState state) =>
-            const DashboardScreen(),
-      ),
+          path: '/dashboard',
+          builder: (BuildContext context, GoRouterState state) =>
+              const DashboardScreen()),
       GoRoute(
-        path: '/user-home',
-        builder: (BuildContext context, GoRouterState state) =>
-            const UserHomeScreen(),
-      ),
+          path: '/user-home',
+          builder: (BuildContext context, GoRouterState state) =>
+              const UserHomeScreen()),
       GoRoute(
-        path: '/profile',
-        builder: (BuildContext context, GoRouterState state) =>
-            const ProfileScreen(),
-      ),
+          path: '/profile',
+          builder: (BuildContext context, GoRouterState state) =>
+              const ProfileScreen()),
       GoRoute(
-        path: '/profile/edit',
-        builder: (BuildContext context, GoRouterState state) =>
-            const ProfileEditScreen(),
-      ),
+          path: '/profile/edit',
+          builder: (BuildContext context, GoRouterState state) =>
+              const ProfileEditScreen()),
       GoRoute(
-        path: '/settings',
-        builder: (BuildContext context, GoRouterState state) =>
-            const SettingsScreen(),
-      ),
+          path: '/settings',
+          builder: (BuildContext context, GoRouterState state) =>
+              const SettingsScreen()),
       GoRoute(
-        path: '/support',
+          path: '/support',
+          builder: (BuildContext context, GoRouterState state) =>
+              const SupportScreen()),
+
+      // Bank account routes
+      // '/bank-accounts' will now redirect the user to their bank account view if one exists,
+      // otherwise it opens the create screen. This uses an intermediate widget that performs the async checks.
+      GoRoute(
+        path: '/bank-accounts',
         builder: (BuildContext context, GoRouterState state) =>
-            const SupportScreen(),
+            const _BankAccountsRedirector(),
       ),
+
+      // create route
+      GoRoute(
+        path: '/bank-account/create',
+        builder: (BuildContext context, GoRouterState state) =>
+            const BankAccountCreateScreen(),
+      ),
+
+      // view route used by other places
+      GoRoute(
+        path: '/bank-account/view/:id',
+        builder: (BuildContext context, GoRouterState state) {
+          final id = state.pathParameters['id'] ?? '';
+          if (!_isValidUuid(id)) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Compte bancaire')),
+              body: const Center(child: Text('Identifiant invalide')),
+            );
+          }
+          return BankAccountViewScreen(id: id);
+        },
+      ),
+
+      // edit route used by actions
+      GoRoute(
+        path: '/bank-account/edit/:id',
+        builder: (BuildContext context, GoRouterState state) {
+          final id = state.pathParameters['id'] ?? '';
+          if (!_isValidUuid(id)) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Modifier le compte')),
+              body: const Center(child: Text('Identifiant invalide')),
+            );
+          }
+          return bank_edit.BankAccountEditScreen(id: id);
+        },
+      ),
+
+      // History list route
+      GoRoute(
+          path: '/history',
+          builder: (BuildContext context, GoRouterState state) =>
+              const HistoryScreen()),
     ],
     redirect: (BuildContext context, GoRouterState state) {
       final uriPath = state.uri.path;
@@ -99,7 +154,27 @@ GoRouter createRouter(AuthState authState) {
 
       final onPublic = dynamicPublicPaths.contains(uriPath);
 
-      // Use initialized + email presence as a safe synchronous indicator to avoid redirect loops
+      // Authenticated routes patterns to allow without forcing role landing
+      final allowedAuthenticatedPatterns = <Pattern>[
+        RegExp(r'^/bank-account(/.*)?$'),
+        RegExp(r'^/bank-accounts$'),
+        RegExp(r'^/history(/.*)?$'),
+        RegExp(r'^/profile(/.*)?$'),
+        RegExp(r'^/settings(/.*)?$'),
+        RegExp(r'^/support(/.*)?$'),
+      ];
+
+      bool matchesAllowedAuthenticated(String path) {
+        for (final p in allowedAuthenticatedPatterns) {
+          if (p is RegExp) {
+            if (p.hasMatch(path)) return true;
+          } else if (p is String) {
+            if (p == path) return true;
+          }
+        }
+        return false;
+      }
+
       final bool ready = authState.initialized;
       final bool loggedInSync =
           ready && (authState.email != null && authState.email!.isNotEmpty);
@@ -110,48 +185,134 @@ GoRouter createRouter(AuthState authState) {
         'pendingLogin=${authState.pendingLogin}, role=${authState.role}, uri=$uriPath',
       );
 
-      // If AuthState still initializing, don't force navigation (let UI decide)
       if (!ready) return null;
 
-      // 1. Not logged in -> allow public pages (including mfa-verify if pending), otherwise force login
+      // If not logged in, force login and preserve next
       if (!loggedInSync && !onPublic) {
-        return '/login';
+        final next = state.uri.toString();
+        return '/login?next=${_encodeNext(next)}';
       }
 
-      // 2. Pending login (OTP expected) -> force /mfa-verify
+      // If pending login (OTP expected) force mfa-verify and preserve next
       if (authState.pendingLogin == true && uriPath != '/mfa-verify') {
-        return '/mfa-verify';
+        final next = state.uri.toString();
+        return '/mfa-verify?next=${_encodeNext(next)}';
       }
 
-      // 3. Logged in but MFA not verified -> force MFA pages
+      // If logged in but not otpVerified, force MFA pages, preserve next
       if (loggedInSync &&
           !authState.otpVerified &&
           uriPath != '/mfa-verify' &&
           uriPath != '/mfa-setup') {
-        if (authState.mfaEnabled == true) return '/mfa-verify';
-        return '/mfa-setup';
+        final next = state.uri.toString();
+        if (authState.mfaEnabled == true)
+          return '/mfa-verify?next=${_encodeNext(next)}';
+        return '/mfa-setup?next=${_encodeNext(next)}';
       }
 
-      // Allow profile-related routes when authenticated and MFA verified
-      final bool isProfileRoute = uriPath == '/profile' ||
-          uriPath == '/profile/edit' ||
-          uriPath.startsWith('/profile/');
-      if (loggedInSync && authState.otpVerified && isProfileRoute) return null;
-
-      // 4. Logged in and MFA verified -> route by role (default landing)
+      // If logged in and otpVerified, allow explicitly permitted authenticated routes
       if (loggedInSync && authState.otpVerified) {
-        final role = authState.role?.toLowerCase();
-        if (role == 'admin' && uriPath != '/dashboard') return '/dashboard';
-        if (role == 'user' && uriPath != '/user-home') return '/user-home';
-        if ((role == null || role.isEmpty) && uriPath != '/home')
-          return '/home';
+        // If the requested route is allowed, do not override it
+        if (matchesAllowedAuthenticated(uriPath)) {
+          // extra guard for view/edit id validity: if route is view/edit but id invalid, redirect to bank-accounts
+          if (uriPath.startsWith('/bank-account/view/') ||
+              uriPath.startsWith('/bank-account/edit/')) {
+            final parts = uriPath.split('/');
+            if (parts.length >= 4) {
+              final id = parts[3];
+              if (!_isValidUuid(id)) {
+                return '/bank-accounts';
+              }
+            }
+          }
+          return null;
+        }
+
+        // Only apply role-based default landing if user is hitting a root/public landing ("/" or home)
+        final bool isRootLike =
+            uriPath == '/' || uriPath == '/home' || onPublic;
+        if (isRootLike) {
+          final role = authState.role?.toLowerCase();
+          if (role == 'admin' && uriPath != '/dashboard') return '/dashboard';
+          if (role == 'user' && uriPath != '/user-home') return '/user-home';
+          if ((role == null || role.isEmpty) && uriPath != '/home')
+            return '/home';
+        }
       }
 
-      // 5. No redirect required
       return null;
     },
     errorBuilder: (BuildContext context, GoRouterState state) => Scaffold(
       body: Center(child: Text('Erreur de navigation: ${state.error}')),
     ),
   );
+}
+
+/// Helper widget used for /bank-accounts route.
+/// It checks whether the current user already has a bank account:
+/// - if yes: navigates to /bank-account/view/<id>
+/// - if no: navigates to /bank-account/create
+/// While checking it displays a small loading indicator.
+class _BankAccountsRedirector extends StatefulWidget {
+  const _BankAccountsRedirector({Key? key}) : super(key: key);
+
+  @override
+  State<_BankAccountsRedirector> createState() =>
+      _BankAccountsRedirectorState();
+}
+
+class _BankAccountsRedirectorState extends State<_BankAccountsRedirector> {
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  Future<void> _resolve() async {
+    try {
+      final profile = await AuthService.getProfile();
+      if (profile == null) {
+        // If no profile, send to login (preserve next handled by router redirect)
+        if (mounted) context.go('/login');
+        return;
+      }
+
+      final profileId = profile['id'] ?? profile['pk'] ?? profile['uuid'];
+      if (profileId == null) {
+        if (mounted) context.go('/bank-account/create');
+        return;
+      }
+
+      final accounts =
+          await AuthService.getBankAccounts(profileId: profileId.toString());
+      if (mounted) {
+        if (accounts != null && accounts.isNotEmpty) {
+          final first = accounts.first;
+          final id = first['id']?.toString();
+          if (id != null && _isValidUuid(id)) {
+            // navigate to view of existing account
+            context.go('/bank-account/view/$id');
+            return;
+          }
+        }
+        // no account found -> go to create
+        context.go('/bank-account/create');
+      }
+    } catch (e, st) {
+      debugPrint('[BankAccountsRedirector] error: $e\n$st');
+      if (mounted) {
+        // fallback to create screen on error
+        context.go('/bank-account/create');
+      }
+    } finally {
+      if (mounted) ;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator()),
+    );
+  }
 }

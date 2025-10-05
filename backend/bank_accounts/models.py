@@ -1,6 +1,3 @@
-from django.db import models
-
-# Create your models here.
 # bank_accounts/models.py
 """
 BankAccount, BankTransaction and BankAudit models.
@@ -9,8 +6,10 @@ BankAccount, BankTransaction and BankAudit models.
 - Meta.db_table keeps predictable table names (public schema).
 - All timestamps use timezone-aware defaults.
 - save() ensures masked_account and iban_normalized are maintained.
+- OneToOne relation enforces un compte bancaire par Profile.
 - Adjust related_name values to avoid collisions with other apps.
 """
+
 import uuid
 from typing import Optional
 
@@ -44,13 +43,14 @@ class BankAccount(models.Model):
     - `iban_encrypted` and `account_number_encrypted` store encrypted plaintext.
     - `masked_account` is derived for safe display.
     - `iban_normalized` is stored for fast search/lookups.
+    - OneToOneField enforces un compte par profile au niveau DB.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    profile = models.ForeignKey(
+    profile = models.OneToOneField(
         "manage_personnel.Profile",
         on_delete=models.CASCADE,
-        related_name="bank_accounts",
+        related_name="bank_account",
         related_query_name="bank_account",
     )
 
@@ -88,9 +88,17 @@ class BankAccount(models.Model):
         ]
 
     def __str__(self) -> str:
+        # Prefer profile username or name when available for readable display
+        profile_obj = getattr(self, "profile", None)
+        profile_ident = None
+        try:
+            if profile_obj:
+                profile_ident = getattr(profile_obj, "username", None) or getattr(profile_obj, "name", None) or getattr(profile_obj, "full_name", None)
+        except Exception:
+            profile_ident = None
         display = self.masked_account or self.label or str(self.id)
-        profile_id = getattr(self.profile, "id", None) or getattr(self.profile, "pk", None)
-        return f"{profile_id} - {display}"
+        profile_display = profile_ident or getattr(profile_obj, "id", None) or getattr(profile_obj, "pk", None) or "profile"
+        return f"{profile_display} - {display}"
 
     def set_iban(self, iban: Optional[str]) -> None:
         """

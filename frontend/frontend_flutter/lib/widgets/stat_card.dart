@@ -50,8 +50,8 @@ class StatCard extends StatelessWidget {
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: Colors.grey[700]),
+                      style: textTheme.bodySmall?.copyWith(
+                          color: const Color.fromARGB(103, 138, 109, 217)),
                     ),
                     const SizedBox(height: 6),
                     Text(

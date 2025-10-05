@@ -321,30 +321,6 @@ class _MFASetupScreenState extends State<MFASetupScreen> {
                               Column(mainAxisSize: MainAxisSize.min, children: [
                             _buildQrCard(qrSize),
                             const SizedBox(height: 8),
-                            if (!loading &&
-                                provisioningUri != null &&
-                                provisioningUri!.isNotEmpty)
-                              Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    _copyButton(),
-                                    const SizedBox(width: 8),
-                                    ElevatedButton.icon(
-                                        onPressed: _loadProvisioningData,
-                                        icon: const Icon(Icons.refresh),
-                                        label: const Text('Rafraîchir'),
-                                        style: ElevatedButton.styleFrom(
-                                            elevation: 0,
-                                            backgroundColor:
-                                                Colors.grey.shade100,
-                                            foregroundColor: Colors.black87,
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 10, vertical: 10),
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(
-                                                        10)))),
-                                  ]),
                           ]);
 
                           final rightPart = SingleChildScrollView(

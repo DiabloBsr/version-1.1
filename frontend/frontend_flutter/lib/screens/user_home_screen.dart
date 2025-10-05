@@ -1,8 +1,11 @@
 // lib/screens/user_home_screen.dart
+// ignore_for_file: unused_field
+
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../utils/secure_storage.dart';
 import '../services/auth_service.dart';
 
@@ -22,12 +25,17 @@ class _UserHomeScreenState extends State<UserHomeScreen>
   Uint8List? _photoBytes;
   late final AnimationController _fadeController;
 
-  // Local in-memory activities loaded from secure storage and runtime captures
-  // Each local entry shape: { text, timestamp, type, meta?, synced: bool, id?:String }
+  // Activities
   List<Map<String, dynamic>> _localActivities = [];
-
-  // Server-side activities loaded via AuthService.getActivities
   List<Map<String, dynamic>> _serverActivities = [];
+
+  // Bank account state
+  bool _hasBankAccount = false;
+  String? _primaryBankAccountId;
+  List<Map<String, dynamic>> _bankAccounts = [];
+
+  // Activity filter state removed; we always display recent activities with tags
+  String _activityFilter = 'all';
 
   @override
   void initState() {
@@ -52,10 +60,8 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     });
 
     try {
-      // 1) reconcile stored local activities: try to post unsynced entries and update local storage
       await _reconcileStoredLocalActivities();
 
-      // 2) load profile
       final profile = await AuthService.getProfile();
       if (profile == null) {
         if (mounted) context.go('/login');
@@ -66,7 +72,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
           ? profile['user']['email'] as String?
           : profile['email'] as String?;
 
-      // 3) if previousProfile provided, compute diff and persist/show
       if (previousProfile != null) {
         final changes = _computeProfileDiff(previousProfile, profile);
         if (changes.isNotEmpty) {
@@ -81,7 +86,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                   })
               .toList();
 
-          // try posting, mark synced true on success
           final List<Map<String, dynamic>> remain = [];
           for (final e in entries) {
             final posted = await AuthService.postActivity(e);
@@ -93,18 +97,46 @@ class _UserHomeScreenState extends State<UserHomeScreen>
             }
           }
 
-          // store remaining failures locally (persist)
           if (remain.isNotEmpty) await _storeLocalActivities(remain);
-
-          // always show new entries immediately (some may be synced)
           setState(() => _localActivities = [...entries, ..._localActivities]);
         }
       }
 
-      // 4) load server activities
       _serverActivities = await AuthService.getActivities(limit: 100);
 
-      // 5) load avatar bytes if available
+      // Load bank accounts for profile
+      try {
+        final profileId =
+            _profile?['id'] ?? _profile?['pk'] ?? _profile?['uuid'];
+        if (profileId != null) {
+          final accounts = await AuthService.getBankAccounts(
+              profileId: profileId.toString());
+          if (accounts != null && accounts.isNotEmpty) {
+            setState(() {
+              _bankAccounts = List<Map<String, dynamic>>.from(accounts);
+              _hasBankAccount = true;
+              final primary = _bankAccounts.firstWhere(
+                  (a) => a['is_primary'] == true,
+                  orElse: () => _bankAccounts.first);
+              _primaryBankAccountId = primary['id']?.toString();
+            });
+          } else {
+            setState(() {
+              _bankAccounts = [];
+              _hasBankAccount = false;
+              _primaryBankAccountId = null;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('[UserHome] getBankAccounts error: $e');
+        setState(() {
+          _bankAccounts = [];
+          _hasBankAccount = false;
+          _primaryBankAccountId = null;
+        });
+      }
+
       final photoPath = _resolvePhotoPath(_profile);
       if (photoPath != null && photoPath.isNotEmpty) {
         final access = await SecureStorage.read('access');
@@ -129,7 +161,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
         return;
       }
 
-      // Normalize and ensure 'synced' field exists
       final entries = parsedRaw.map<Map<String, dynamic>>((e) {
         if (e is Map) {
           final m = Map<String, dynamic>.from(e);
@@ -146,7 +177,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
 
       final List<Map<String, dynamic>> failures = [];
       for (final e in entries) {
-        // skip already-synced entries (defensive)
         if (e['synced'] == true) continue;
         try {
           final posted = await AuthService.postActivity(e);
@@ -157,14 +187,12 @@ class _UserHomeScreenState extends State<UserHomeScreen>
         }
       }
 
-      // Persist failures only
       if (failures.isEmpty) {
         await SecureStorage.delete('local_activities');
       } else {
         await SecureStorage.write('local_activities', jsonEncode(failures));
       }
 
-      // update in-memory local activities to show remaining unsynced ones first
       final unsynced = failures;
       setState(() => _localActivities = [...unsynced, ..._localActivities]);
     } catch (e, st) {
@@ -174,7 +202,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
 
   Future<void> _storeLocalActivities(List<Map<String, dynamic>> entries) async {
     try {
-      // ensure entries have synced flag
       final normalized = entries.map((e) {
         final m = Map<String, dynamic>.from(e);
         m['synced'] = m['synced'] == true;
@@ -227,10 +254,18 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     final first = (_profile?['prenom'] as String?)?.trim() ?? '';
     final last = (_profile?['nom'] as String?)?.trim() ?? '';
     final name = [first, last].where((s) => s.isNotEmpty).join(' ');
-    final initials = name.isNotEmpty
-        ? name.split(' ').map((s) => s[0]).join().toUpperCase()
-        : ((_profile?['user']?['email'] as String?) ?? _email ?? 'U')[0]
-            .toUpperCase();
+    String initials;
+    if (name.isNotEmpty) {
+      initials = name
+          .split(' ')
+          .where((s) => s.isNotEmpty)
+          .map((s) => s[0])
+          .join()
+          .toUpperCase();
+    } else {
+      final emailOr = (_profile?['user']?['email'] as String?) ?? _email ?? 'U';
+      initials = (emailOr.isNotEmpty ? emailOr[0] : 'U').toUpperCase();
+    }
 
     final avatar = _photoBytes != null
         ? CircleAvatar(
@@ -251,6 +286,273 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                         color: Colors.white, fontWeight: FontWeight.w700)));
 
     return Material(elevation: 4, shape: const CircleBorder(), child: avatar);
+  }
+
+  // Combine local and server activities and normalize with a category detection
+  List<Map<String, dynamic>> get _combinedActivities {
+    final seen = <String>{};
+    final merged = <Map<String, dynamic>>[];
+
+    // local first (unsynced first)
+    for (final a in _localActivities) {
+      final key = '${a['text'] ?? ''}::${a['timestamp'] ?? ''}';
+      if (!seen.contains(key)) {
+        final m = Map<String, dynamic>.from(a);
+        m['category'] = _detectCategory(m);
+        merged.add(m);
+        seen.add(key);
+      }
+    }
+
+    // server activities
+    for (final s in _serverActivities) {
+      final text = s['text'] ?? s['description'] ?? s.toString();
+      final timestamp = s['timestamp']?.toString() ?? '';
+      final key = '$text::$timestamp';
+      if (!seen.contains(key)) {
+        final item = {
+          'text': text.toString(),
+          'timestamp': timestamp,
+          'raw': s,
+          'synced': true,
+        };
+        // attach category
+        item['category'] = _detectCategory(s);
+        merged.add(item);
+        seen.add(key);
+      }
+    }
+
+    return merged;
+  }
+
+  // Heuristic to detect bank-account related activities
+  String _detectCategory(dynamic entry) {
+    try {
+      if (entry is Map) {
+        final t = (entry['type'] as String?) ?? '';
+        if (t == 'bank_account' || t == 'bank') return 'bank_account';
+        final meta = entry['meta'];
+        if (meta is Map) {
+          final resource = (meta['resource'] as String?) ??
+              (meta['resource_type'] as String?);
+          if (resource != null && resource.toLowerCase().contains('bank'))
+            return 'bank_account';
+          final source = (meta['source'] as String?) ?? '';
+          if (source.toLowerCase().contains('bank')) return 'bank_account';
+          final accountId = meta['account_id'] ?? meta['resource_id'];
+          if (accountId != null) return 'bank_account';
+        }
+        final text = (entry['text'] ?? entry['description'] ?? '')
+            .toString()
+            .toLowerCase();
+        if (text.contains('compte') ||
+            text.contains('banc') ||
+            text.contains('iban') ||
+            text.contains('banque')) {
+          return 'bank_account';
+        }
+      } else {
+        final s = entry.toString().toLowerCase();
+        if (s.contains('compte') || s.contains('banque') || s.contains('iban'))
+          return 'bank_account';
+      }
+    } catch (_) {}
+    return 'general';
+  }
+
+  Widget _recentActivityCard(BuildContext context) {
+    final combined = _combinedActivities;
+
+    // We always show recent activities and differentiate with tags instead of a filter toggle
+    final filtered = combined; // show all, tags indicate types
+
+    if (filtered.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 12,
+                  offset: const Offset(0, 6))
+            ]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Activité récente',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          Text('Aucune activité correspondante',
+              style: TextStyle(color: Colors.grey.shade600)),
+        ]),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black12,
+                blurRadius: 12,
+                offset: const Offset(0, 6))
+          ]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              children: [
+                const Expanded(
+                    child: Text('Activité récente',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700))),
+                // Removed toggle buttons; tags will indicate category
+              ],
+            )),
+        ...filtered.take(6).map((a) {
+          final text = a['text']?.toString() ?? a.toString();
+          final tsStr = (a['timestamp']?.toString() ?? '');
+          final ts = tsStr.isNotEmpty ? ' • ${_formatTimestamp(tsStr)}' : '';
+          final synced = a['synced'] == true;
+          final category = a['category'] as String? ?? 'general';
+
+          // Tag widget
+          Widget tagFor(String category) {
+            if (category == 'bank_account') {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Text('Compte',
+                    style:
+                        TextStyle(color: Colors.green.shade800, fontSize: 11)),
+              );
+            }
+            if (category == 'profile_change' ||
+                (a['type'] == 'profile_change')) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Text('Profil',
+                    style:
+                        TextStyle(color: Colors.blue.shade800, fontSize: 11)),
+              );
+            }
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12)),
+              child: Text('Général',
+                  style: TextStyle(color: Colors.grey.shade800, fontSize: 11)),
+            );
+          }
+
+          return ListTile(
+            leading: CircleAvatar(
+                radius: 6,
+                backgroundColor: category == 'bank_account'
+                    ? Colors.green.shade700
+                    : Colors.blue.shade700),
+            title: Text(text),
+            subtitle: ts.isNotEmpty ? Text(ts) : null,
+            trailing:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              if (!synced)
+                Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.orange.shade100,
+                        borderRadius: BorderRadius.circular(12)),
+                    child: const Text('Non synchronisé',
+                        style: TextStyle(fontSize: 11, color: Colors.orange))),
+              const SizedBox(height: 6),
+              tagFor(category),
+            ]),
+            onTap: () {
+              // Always route to bank accounts list for bank activities so user can select
+              if (a['category'] == 'bank_account') {
+                context.go('/bank-accounts');
+              } else {
+                context.go('/history');
+              }
+            },
+          );
+        }).toList(),
+        if (filtered.length > 6)
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Text('Voir tout',
+                  style: TextStyle(color: Theme.of(context).primaryColor))),
+      ]),
+    );
+  }
+
+  String _formatTimestamp(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      return DateFormat.yMMMd().add_jm().format(dt);
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  Widget _actionsCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black12,
+                blurRadius: 12,
+                offset: const Offset(0, 6))
+          ]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Text('Actions rapides',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 10),
+        ElevatedButton.icon(
+            onPressed: () async {
+              final prev = _profile == null
+                  ? null
+                  : Map<String, dynamic>.from(_profile!);
+              await context.push('/profile/edit');
+              await _loadAll(previousProfile: prev);
+            },
+            icon: const Icon(Icons.edit),
+            label: const Text('Éditer profil')),
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+            onPressed: () {
+              // Redirect to bank accounts list instead of directly to a specific view
+              context.go(
+                  _hasBankAccount ? '/bank-accounts' : '/bank-account/create');
+            },
+            icon: const Icon(Icons.account_balance),
+            label: Text(_hasBankAccount
+                ? 'Afficher compte bancaire'
+                : 'Ajouter compte bancaire')),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+            onPressed: () => _logout(context),
+            icon: _loggingOut
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.logout),
+            label: const Text('Se déconnecter')),
+      ]),
+    );
   }
 
   Widget _profileCard(BuildContext context) {
@@ -298,11 +600,11 @@ class _UserHomeScreenState extends State<UserHomeScreen>
           Wrap(spacing: 8, runSpacing: 6, children: [
             Chip(
                 label: Text(role.toUpperCase()),
-                backgroundColor: Colors.blue.shade50),
+                backgroundColor: const Color.fromARGB(255, 103, 216, 113)),
             if ((_profile?['mfa_enabled'] as bool? ?? false))
               Chip(
                   label: const Text('MFA activée'),
-                  backgroundColor: Colors.green.shade50)
+                  backgroundColor: const Color.fromARGB(202, 192, 196, 66))
             else
               ActionChip(
                   label: const Text('Configurer MFA'),
@@ -323,154 +625,58 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     );
   }
 
-  List<Map<String, dynamic>> get _combinedActivities {
-    final seen = <String>{};
-    final merged = <Map<String, dynamic>>[];
-
-    // show local entries first, preserving their synced flag
-    for (final a in _localActivities) {
-      final key = '${a['text'] ?? ''}::${a['timestamp'] ?? ''}';
-      if (!seen.contains(key)) {
-        merged.add(a);
-        seen.add(key);
-      }
-    }
-
-    for (final s in _serverActivities) {
-      final text = s['text'] ?? s['description'] ?? s.toString();
-      final timestamp = s['timestamp']?.toString() ?? '';
-      final key = '$text::$timestamp';
-      if (!seen.contains(key)) {
-        merged.add({
-          'text': text.toString(),
-          'timestamp': timestamp,
-          'raw': s,
-          'synced': true
-        });
-        seen.add(key);
-      }
-    }
-    return merged;
-  }
-
-  Widget _recentActivityCard(BuildContext context) {
-    final combined = _combinedActivities;
-    if (combined.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 12,
-                  offset: const Offset(0, 6))
-            ]),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Activité récente',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 12),
-          Text('Aucune activité récente',
-              style: TextStyle(color: Colors.grey.shade600)),
-        ]),
-      );
-    }
-
-    return GestureDetector(
-      onTap: () => context.go('/history'),
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 12,
-                  offset: const Offset(0, 6))
-            ]),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Text('Activité récente',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-          ...combined.take(5).map((a) {
-            final text = a['text']?.toString() ?? a.toString();
-            final ts = (a['timestamp']?.toString() ?? '').isNotEmpty
-                ? ' • ${a['timestamp']}'
-                : '';
-            final synced = a['synced'] == true;
-            return ListTile(
-              leading: CircleAvatar(
-                  radius: 6, backgroundColor: Colors.blue.shade700),
-              title: Text(text),
-              subtitle: ts.isNotEmpty ? Text(ts) : null,
-              trailing: synced
-                  ? null
-                  : Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                          color: Colors.orange.shade100,
-                          borderRadius: BorderRadius.circular(12)),
-                      child: const Text('Non synchronisé',
-                          style:
-                              TextStyle(fontSize: 11, color: Colors.orange))),
-            );
-          }).toList(),
-          if (combined.length > 5)
-            Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Text('Voir tout',
-                    style: TextStyle(color: Theme.of(context).primaryColor))),
-        ]),
-      ),
+  Widget _quickActionsGrid(BuildContext context) {
+    final crossCount = MediaQuery.of(context).size.width > 720 ? 4 : 2;
+    return GridView.count(
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      crossAxisCount: crossCount,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      children: [
+        _quickAction(context, Icons.person, 'Éditer profil', () async {
+          final prev =
+              _profile == null ? null : Map<String, dynamic>.from(_profile!);
+          await context.push('/profile/edit');
+          await _loadAll(previousProfile: prev);
+        }),
+        _quickAction(context, Icons.verified_user, 'Gérer MFA',
+            () => context.go('/mfa-setup')),
+        _quickAction(context, Icons.account_balance,
+            _hasBankAccount ? 'Compte bancaire' : 'Ajouter compte bancaire',
+            () {
+          context
+              .go(_hasBankAccount ? '/bank-accounts' : '/bank-account/create');
+        }),
+        _quickAction(
+            context, Icons.history, 'Historique', () => context.go('/history')),
+      ],
     );
   }
 
-  Widget _actionsCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black12,
-                blurRadius: 12,
-                offset: const Offset(0, 6))
-          ]),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Text('Actions rapides',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 10),
-        ElevatedButton.icon(
-            onPressed: () async {
-              final prev = _profile == null
-                  ? null
-                  : Map<String, dynamic>.from(_profile!);
-              await context.push('/profile/edit');
-              await _loadAll(previousProfile: prev);
-            },
-            icon: const Icon(Icons.edit),
-            label: const Text('Éditer profil')),
-        const SizedBox(height: 8),
-        ElevatedButton.icon(
-            onPressed: () => context.go('/profile-extra'),
-            icon: const Icon(Icons.account_balance_wallet),
-            label: const Text('Comptes bancaires')),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-            onPressed: () => _logout(context),
-            icon: _loggingOut
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.logout),
-            label: const Text('Se déconnecter')),
-      ]),
+  Widget _quickAction(
+      BuildContext context, IconData icon, String title, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        decoration: BoxDecoration(
+            color: Theme.of(context).canvasColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade100)),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          CircleAvatar(
+              radius: 20,
+              backgroundColor: Colors.blue.shade700,
+              child: Icon(icon, color: Colors.white, size: 20)),
+          const SizedBox(height: 8),
+          Text(title,
+              textAlign: TextAlign.center,
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        ]),
+      ),
     );
   }
 
@@ -625,56 +831,5 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     }
 
     return changes;
-  }
-
-  Widget _quickActionsGrid(BuildContext context) {
-    final crossCount = MediaQuery.of(context).size.width > 720 ? 4 : 2;
-    return GridView.count(
-      physics: const NeverScrollableScrollPhysics(),
-      shrinkWrap: true,
-      crossAxisCount: crossCount,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      children: [
-        _quickAction(context, Icons.person, 'Éditer profil', () async {
-          final prev =
-              _profile == null ? null : Map<String, dynamic>.from(_profile!);
-          await context.push('/profile/edit');
-          await _loadAll(previousProfile: prev);
-        }),
-        _quickAction(context, Icons.verified_user, 'Gérer MFA',
-            () => context.go('/mfa-setup')),
-        _quickAction(context, Icons.account_balance, 'Comptes bancaires',
-            () => context.go('/profile-extra')),
-        _quickAction(
-            context, Icons.history, 'Historique', () => context.go('/history')),
-      ],
-    );
-  }
-
-  Widget _quickAction(
-      BuildContext context, IconData icon, String title, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-        decoration: BoxDecoration(
-            color: Theme.of(context).canvasColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade100)),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.blue.shade700,
-              child: Icon(icon, color: Colors.white, size: 20)),
-          const SizedBox(height: 8),
-          Text(title,
-              textAlign: TextAlign.center,
-              style:
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-        ]),
-      ),
-    );
   }
 }

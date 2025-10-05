@@ -374,6 +374,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primaryColor = theme.colorScheme.primary;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Modifier mon profil'),
@@ -432,23 +435,61 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       ]),
                       const SizedBox(height: 12),
                       Row(children: [
-                        ElevatedButton.icon(
+                        SizedBox(
+                          height: 40,
+                          child: ElevatedButton.icon(
                             onPressed: () => _pickImage(ImageSource.gallery),
-                            icon: const Icon(Icons.photo),
-                            label: const Text('Galerie')),
+                            icon: const Icon(Icons.photo, size: 18),
+                            label: const Text('Galerie',
+                                style: TextStyle(fontSize: 14)),
+                            style: ElevatedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              minimumSize: const Size(0, 40),
+                              elevation: 2,
+                            ),
+                          ),
+                        ),
                         const SizedBox(width: 8),
-                        ElevatedButton.icon(
+                        SizedBox(
+                          height: 40,
+                          child: ElevatedButton.icon(
                             onPressed: () => _pickImage(ImageSource.camera),
-                            icon: const Icon(Icons.camera_alt),
-                            label: const Text('Caméra')),
+                            icon: const Icon(Icons.camera_alt, size: 18),
+                            label: const Text('Caméra',
+                                style: TextStyle(fontSize: 14)),
+                            style: ElevatedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              minimumSize: const Size(0, 40),
+                              elevation: 2,
+                            ),
+                          ),
+                        ),
                         if (_pickedXFile != null) ...[
                           const SizedBox(width: 8),
-                          TextButton(
+                          SizedBox(
+                            height: 40,
+                            child: OutlinedButton(
                               onPressed: () => setState(() {
-                                    _pickedXFile = null;
-                                    _pickedBytes = null;
-                                  }),
-                              child: const Text('Annuler image')),
+                                _pickedXFile = null;
+                                _pickedBytes = null;
+                              }),
+                              child: const Text('Annuler image',
+                                  style: TextStyle(fontSize: 14)),
+                              style: OutlinedButton.styleFrom(
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                minimumSize: const Size(0, 40),
+                              ),
+                            ),
+                          ),
                         ]
                       ]),
                       const SizedBox(height: 12),
@@ -566,36 +607,74 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                             ])),
                       ]),
                       const SizedBox(height: 18),
-                      Row(children: [
-                        Expanded(
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 140,
+                            height: 44,
                             child: ElevatedButton.icon(
-                                icon: _saving
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white))
-                                    : const Icon(Icons.save),
-                                label: const Text('Sauvegarder'),
-                                onPressed: _saving
-                                    ? null
-                                    : () async {
-                                        final ok = await _submit();
-                                        if (!ok && mounted)
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(const SnackBar(
-                                                  content: Text(
-                                                      'Échec de la mise à jour')));
-                                      })),
-                        const SizedBox(width: 12),
-                        Expanded(
+                              icon: _saving
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white))
+                                  : const Icon(Icons.save, size: 18),
+                              label: const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                  child: Text('Sauvegarder',
+                                      style: TextStyle(fontSize: 14))),
+                              onPressed: _saving
+                                  ? null
+                                  : () async {
+                                      final ok = await _submit();
+                                      if (!ok && mounted)
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(const SnackBar(
+                                                content: Text(
+                                                    'Échec de la mise à jour')));
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                elevation: 2,
+                                backgroundColor: primaryColor,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 140,
+                            height: 44,
                             child: OutlinedButton.icon(
-                                icon: const Icon(Icons.close),
-                                label: const Text('Annuler'),
-                                onPressed:
-                                    _saving ? null : () => context.pop())),
-                      ]),
+                              onPressed: _saving ? null : () => context.pop(),
+                              icon: const Icon(Icons.close, size: 18),
+                              label: const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                  child: Text('Annuler',
+                                      style: TextStyle(fontSize: 14))),
+                              style: OutlinedButton.styleFrom(
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                side: BorderSide(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.12)),
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onSurface,
+                                backgroundColor: Colors.transparent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 40),
                     ],
                   ),

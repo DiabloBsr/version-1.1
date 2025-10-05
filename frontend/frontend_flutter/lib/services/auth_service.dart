@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -10,14 +12,26 @@ import '../utils/secure_storage.dart';
 
 class AuthService {
   // API constants
-  static const String apiBase = 'http://127.0.0.1:8000/api/v1';
+  // Platform-aware apiBase without using dart:io Platform to avoid Web crash
+  static String get apiBase {
+    if (kIsWeb) return 'http://127.0.0.1:8000/api/v1';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      // Android emulator (AVD) should use 10.0.2.2 to reach host
+      return 'http://10.0.2.2:8000/api/v1';
+    }
+    // iOS simulator, desktop, etc.
+    return 'http://127.0.0.1:8000/api/v1';
+  }
+
   static const String _apiBaseRoot = 'http://127.0.0.1:8000';
   static String get baseUrl => _apiBaseRoot;
   static String? appVersion;
 
   /// Build auth headers. If [json] is true, include Content-Type: application/json.
-  static Future<Map<String, String>> _authHeaders(
-      {bool json = true, bool acceptJson = true}) async {
+  static Future<Map<String, String>> _authHeaders({
+    bool json = true,
+    bool acceptJson = true,
+  }) async {
     final rawToken = await SecureStorage.read('access');
     final token = rawToken?.trim();
     final headers = <String, String>{};
@@ -30,8 +44,10 @@ class AuthService {
   }
 
   /// Save token values safely (trimmed)
-  static Future<void> _saveAccessRefresh(
-      {required String access, String? refresh}) async {
+  static Future<void> _saveAccessRefresh({
+    required String access,
+    String? refresh,
+  }) async {
     await SecureStorage.write('access', access.trim());
     if (refresh != null && refresh.trim().isNotEmpty) {
       await SecureStorage.write('refresh', refresh.trim());
@@ -46,7 +62,6 @@ class AuthService {
       debugPrint('[AuthService] refreshTokens: no refresh token');
       return false;
     }
-
     try {
       final res = await http
           .post(
@@ -162,7 +177,6 @@ class AuthService {
     if (token == null || token.isEmpty) {
       throw Exception('No access token');
     }
-
     var resp = await requestFn(token);
     if (resp.statusCode != 401) return resp;
 
@@ -181,12 +195,9 @@ class AuthService {
   static Future<Map<String, dynamic>?> getProfile() async {
     try {
       final res = await http
-          .get(
-            Uri.parse('$apiBase/profiles/me/'),
-            headers: await _authHeaders(),
-          )
+          .get(Uri.parse('$apiBase/profiles/me/'),
+              headers: await _authHeaders())
           .timeout(const Duration(seconds: 10));
-
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final role = data['role'] as String?;
@@ -219,12 +230,9 @@ class AuthService {
   static Future<Map<String, dynamic>?> setupMFA() async {
     try {
       final res = await http
-          .get(
-            Uri.parse('$apiBase/auth/mfa/setup/'),
-            headers: await _authHeaders(),
-          )
+          .get(Uri.parse('$apiBase/auth/mfa/setup/'),
+              headers: await _authHeaders())
           .timeout(const Duration(seconds: 10));
-
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         debugPrint('[AuthService] setupMFA: success keys=${data.keys}');
@@ -247,13 +255,9 @@ class AuthService {
   static Future<Map<String, dynamic>> verifyMFA(String otp) async {
     try {
       final res = await http
-          .post(
-            Uri.parse('$apiBase/auth/mfa/verify/'),
-            headers: await _authHeaders(),
-            body: jsonEncode({'otp': otp}),
-          )
+          .post(Uri.parse('$apiBase/auth/mfa/verify/'),
+              headers: await _authHeaders(), body: jsonEncode({'otp': otp}))
           .timeout(const Duration(seconds: 10));
-
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
 
@@ -415,7 +419,6 @@ class AuthService {
       debugPrint('[AuthService] updateProfile: no access token');
       return false;
     }
-
     final url = '$apiBase/profiles/me/';
     final fields = <String, String>{
       'nom': nom,
@@ -477,7 +480,6 @@ class AuthService {
       debugPrint('[AuthService] updateProfileWithBytes: no access token');
       return false;
     }
-
     final url = '$apiBase/profiles/me/';
     final fields = <String, String>{
       'nom': nom,
@@ -528,14 +530,13 @@ class AuthService {
       return false;
     } else {
       return updateProfile(
-        nom: nom,
-        prenom: prenom,
-        email: email,
-        photoFile: null,
-        extraFields: extraFields,
-        photoField: photoField,
-        method: method,
-      );
+          nom: nom,
+          prenom: prenom,
+          email: email,
+          photoFile: null,
+          extraFields: extraFields,
+          photoField: photoField,
+          method: method);
     }
   }
 
@@ -545,7 +546,6 @@ class AuthService {
       final headers = <String, String>{'Accept': 'application/octet-stream'};
       if (accessToken != null && accessToken.isNotEmpty)
         headers['Authorization'] = 'Bearer $accessToken';
-
       final resp = await http
           .get(Uri.parse(url), headers: headers)
           .timeout(const Duration(seconds: 12));
@@ -611,15 +611,13 @@ class AuthService {
     if (token == null || token.isEmpty) return null;
     try {
       final resp = await http
-          .post(
-            Uri.parse('$apiBase/activities/batch/'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: jsonEncode({'activities': activities}),
-          )
+          .post(Uri.parse('$apiBase/activities/batch/'),
+              headers: {
+                'Authorization': 'Bearer $token',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: jsonEncode({'activities': activities}))
           .timeout(const Duration(seconds: 30));
       if (resp.statusCode == 200 || resp.statusCode == 201) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
@@ -636,7 +634,7 @@ class AuthService {
     return null;
   }
 
-  /// Fetch activities for current user. Uses /activities/ endpoint with optional query params.
+  /// Get activities for current user. Uses /activities/ endpoint with optional query params.
   /// Returns list of maps (may be empty).
   static Future<List<Map<String, dynamic>>> getActivities(
       {int limit = 100, String? type, int? page}) async {
@@ -652,15 +650,17 @@ class AuthService {
         'Authorization': 'Bearer $token',
         'Accept': 'application/json'
       }).timeout(const Duration(seconds: 10));
+
       if (resp.statusCode == 200) {
-        final body = jsonDecode(resp.body);
+        final bodyRaw = resp.bodyBytes;
+        final decoded = utf8.decode(bodyRaw);
+        final body = jsonDecode(decoded);
         if (body is List) {
           return body.map<Map<String, dynamic>>((e) {
             if (e is Map) return Map<String, dynamic>.from(e);
             return {'text': e.toString()};
           }).toList();
         }
-        // support paginated or envelope responses {results: [...]}
         if (body is Map && body['results'] is List) {
           return (body['results'] as List).map<Map<String, dynamic>>((e) {
             if (e is Map) return Map<String, dynamic>.from(e);
@@ -680,5 +680,264 @@ class AuthService {
       debugPrint('[AuthService] getActivities error: $e\n$st');
     }
     return [];
+  }
+
+  // --- Bank account helper methods used by UI ---
+
+  /// Get bank accounts for a profile. Returns list (may be empty) or null on auth error.
+  static Future<List<Map<String, dynamic>>?> getBankAccounts(
+      {required String profileId}) async {
+    final token = (await SecureStorage.read('access'))?.trim();
+    if (token == null || token.isEmpty) return null;
+    try {
+      final uri = Uri.parse('$apiBase/bank-accounts/')
+          .replace(queryParameters: {'profile': profileId});
+      final resp = await http.get(uri, headers: {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json'
+      }).timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(utf8.decode(resp.bodyBytes));
+        if (body is List) {
+          return (body)
+              .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+        if (body is Map && body['results'] is List) {
+          return (body['results'] as List)
+              .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+      } else if (resp.statusCode == 401) {
+        final refreshed = await refreshTokens();
+        if (refreshed) return getBankAccounts(profileId: profileId);
+      } else {
+        debugPrint(
+            '[AuthService] getBankAccounts failed: ${resp.statusCode} ${resp.body}');
+      }
+    } catch (e, st) {
+      debugPrint('[AuthService] getBankAccounts error: $e\n$st');
+    }
+    return null;
+  }
+
+  /// Get a single bank account by id.
+  static Future<Map<String, dynamic>?> getBankAccount(String id) async {
+    final token = (await SecureStorage.read('access'))?.trim();
+    if (token == null || token.isEmpty) return null;
+    try {
+      final uri = Uri.parse('$apiBase/bank-accounts/$id/');
+      final resp = await http.get(uri, headers: {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json'
+      }).timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        return Map<String, dynamic>.from(
+            jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+      } else if (resp.statusCode == 401) {
+        final refreshed = await refreshTokens();
+        if (refreshed) return getBankAccount(id);
+      } else {
+        debugPrint(
+            '[AuthService] getBankAccount failed: ${resp.statusCode} ${resp.body}');
+      }
+    } catch (e, st) {
+      debugPrint('[AuthService] getBankAccount error: $e\n$st');
+    }
+    return null;
+  }
+
+  /// Create a bank account. Returns created object map or null.
+  static Future<Map<String, dynamic>?> createBankAccount(
+      Map<String, dynamic> payload) async {
+    final token = (await SecureStorage.read('access'))?.trim();
+    if (token == null || token.isEmpty) return null;
+    try {
+      final uri = Uri.parse('$apiBase/bank-accounts/');
+      final resp = await http
+          .post(uri,
+              headers: {
+                'Authorization': 'Bearer $token',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: jsonEncode(payload))
+          .timeout(const Duration(seconds: 12));
+      if (resp.statusCode == 201 || resp.statusCode == 200) {
+        final created = Map<String, dynamic>.from(
+            jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+        // best-effort: record change activity asynchronously
+        try {
+          notifyBankAccountChange(
+              action: 'create',
+              accountId: created['id']?.toString() ?? '',
+              detail: {
+                'bank_name': created['bank_name'],
+                'profile': created['profile'],
+              });
+        } catch (_) {}
+        return created;
+      } else if (resp.statusCode == 401) {
+        final refreshed = await refreshTokens();
+        if (refreshed) return createBankAccount(payload);
+      } else {
+        debugPrint(
+            '[AuthService] createBankAccount failed: ${resp.statusCode} ${resp.body}');
+      }
+    } catch (e, st) {
+      debugPrint('[AuthService] createBankAccount error: $e\n$st');
+    }
+    return null;
+  }
+
+  /// Delete a bank account. Returns true on success (204/200).
+  static Future<bool> deleteBankAccount(String id) async {
+    String? token = (await SecureStorage.read('access'))?.trim();
+    if (token == null || token.isEmpty) {
+      debugPrint('[AuthService] deleteBankAccount: no token');
+      return false;
+    }
+
+    final candidates = [
+      Uri.parse('$apiBase/bank-accounts/$id/'),
+      Uri.parse('$apiBase/bank-accounts/$id'),
+    ];
+
+    for (final uri in candidates) {
+      try {
+        debugPrint(
+            '[AuthService] DELETE $uri (token present=${token!.isNotEmpty})');
+        var resp = await http.delete(uri, headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json'
+        }).timeout(const Duration(seconds: 15));
+        debugPrint('[AuthService] DELETE ${resp.statusCode} ${resp.body}');
+
+        if (resp.statusCode == 200 || resp.statusCode == 204) {
+          // record deletion activity asynchronously
+          try {
+            notifyBankAccountChange(
+                action: 'delete', accountId: id, detail: null);
+          } catch (_) {}
+          return true;
+        }
+
+        if (resp.statusCode == 401) {
+          debugPrint('[AuthService] DELETE 401, attempting refreshTokens');
+          final refreshed = await refreshTokens();
+          debugPrint('[AuthService] refreshTokens -> $refreshed');
+          if (!refreshed) return false;
+          token = (await SecureStorage.read('access'))?.trim();
+          if (token == null || token.isEmpty) return false;
+          resp = await http.delete(uri, headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json'
+          }).timeout(const Duration(seconds: 15));
+          debugPrint(
+              '[AuthService] Retry DELETE ${resp.statusCode} ${resp.body}');
+          if (resp.statusCode == 200 || resp.statusCode == 204) {
+            try {
+              notifyBankAccountChange(
+                  action: 'delete', accountId: id, detail: null);
+            } catch (_) {}
+            return true;
+          }
+        }
+
+        if (resp.statusCode == 404) {
+          debugPrint(
+              '[AuthService] DELETE 404 at $uri — trying next candidate if any');
+          continue;
+        }
+
+        debugPrint(
+            '[AuthService] deleteBankAccount failed: ${resp.statusCode} ${resp.body}');
+        return false;
+      } catch (e, st) {
+        debugPrint('[AuthService] deleteBankAccount error for $uri: $e\n$st');
+        continue;
+      }
+    }
+
+    return false;
+  }
+
+  // --- Bank account change activity helpers (local counter + tagged activity) ---
+
+  /// Internal: increment local bank account change counter and return new value.
+  static Future<int> _incrementBankAccountChangeCount() async {
+    final key = 'bank_account_change_count';
+    try {
+      final raw = await SecureStorage.read(key);
+      final current = int.tryParse(raw ?? '0') ?? 0;
+      final next = current + 1;
+      await SecureStorage.write(key, next.toString());
+      return next;
+    } catch (e, st) {
+      debugPrint(
+          '[AuthService] _incrementBankAccountChangeCount error: $e\n$st');
+      return 0;
+    }
+  }
+
+  /// Internal: post an activity describing the bank account change with a specific tag.
+  static Future<bool> _postBankAccountChangeActivity({
+    required String action, // e.g. "create", "update", "delete"
+    required String accountId,
+    Map<String, dynamic>? detail,
+  }) async {
+    final actorToken = (await SecureStorage.read('access'))?.trim();
+    if (actorToken == null || actorToken.isEmpty) return false;
+
+    final count = await _incrementBankAccountChangeCount();
+
+    final activity = <String, dynamic>{
+      'text': 'Bank account $action: $accountId',
+      'type': 'bank_account_change',
+      'tag': 'bank_account_change',
+      'timestamp': DateTime.now().toUtc().toIso8601String(),
+      'meta': {
+        'account_id': accountId,
+        'action': action,
+        'local_count': count,
+        if (detail != null) 'detail': detail,
+      },
+    };
+
+    // reuse postActivity which performs token refresh on 401
+    final posted = await postActivity(activity);
+    return posted;
+  }
+
+  /// Public convenience: notify the service that a bank account changed (call after successful update/create/delete).
+  static Future<bool> notifyBankAccountChange({
+    required String action, // "create" | "update" | "delete"
+    required String accountId,
+    Map<String, dynamic>? detail,
+  }) =>
+      _postBankAccountChangeActivity(
+          action: action, accountId: accountId, detail: detail);
+
+  /// Utility: fetch the current local bank account change count
+  static Future<int> getBankAccountChangeCount() async {
+    try {
+      final raw = await SecureStorage.read('bank_account_change_count');
+      return int.tryParse(raw ?? '0') ?? 0;
+    } catch (e, st) {
+      debugPrint('[AuthService] getBankAccountChangeCount error: $e\n$st');
+      return 0;
+    }
+  }
+
+  /// Create a bank-account update helper (client-side) — not strictly required but convenient:
+  /// call this after a successful update to notify and increment local counter.
+  static Future<void> recordBankAccountUpdate({
+    required String accountId,
+    Map<String, dynamic>? detail,
+  }) async {
+    try {
+      await _postBankAccountChangeActivity(
+          action: 'update', accountId: accountId, detail: detail);
+    } catch (_) {}
   }
 }
