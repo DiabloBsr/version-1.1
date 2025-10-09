@@ -1,3 +1,6 @@
+// lib/widgets/app_drawer.dart
+// ignore_for_file: unused_local_variable
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../auth_provider.dart';
@@ -9,12 +12,11 @@ class AppDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = AuthProvider.of(context);
-
+    final theme = Theme.of(context);
     return Drawer(
       child: SafeArea(
         child: Column(
           children: [
-            // Compact header: avatar + email + role (no big title)
             Container(
               width: double.infinity,
               color: Colors.blue.shade700,
@@ -50,8 +52,6 @@ class AppDrawer extends StatelessWidget {
                 ],
               ),
             ),
-
-            // Navigation items
             ListTile(
               leading: const Icon(Icons.home),
               title: const Text('Accueil'),
@@ -92,7 +92,6 @@ class AppDrawer extends StatelessWidget {
                 context.go('/profile');
               },
             ),
-
             const Spacer(),
             const Divider(height: 1),
             ListTile(
@@ -108,6 +107,7 @@ class AppDrawer extends StatelessWidget {
                 context.go('/login');
               },
             ),
+            const SizedBox(height: 8),
           ],
         ),
       ),

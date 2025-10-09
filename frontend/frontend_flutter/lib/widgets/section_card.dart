@@ -1,3 +1,4 @@
+// lib/widgets/section_card.dart
 import 'package:flutter/material.dart';
 
 class SectionCard extends StatelessWidget {
@@ -12,12 +13,10 @@ class SectionCard extends StatelessWidget {
     this.trailing,
   });
 
-  /// Builds a visual distribution list (label -> int) using a single gradient
-  /// color for all bars (dark blue -> black). Colors of individual bars are ignored.
   static Widget buildFromDistribution({
     required Map<String, int> data,
-    required Color gradientStart, // e.g. Color(0xFF0A3F8B)
-    required Color gradientEnd, // e.g. Colors.black
+    required Color gradientStart,
+    required Color gradientEnd,
     bool showPercent = true,
     Map<String, String>? labels,
   }) {
@@ -27,7 +26,7 @@ class SectionCard extends StatelessWidget {
 
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: entries.mapIndexed<Widget>((i, e) {
+      children: entries.map((e) {
         final label = labels != null && labels.containsKey(e.key)
             ? labels[e.key]!
             : e.key;
@@ -52,13 +51,14 @@ class SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      elevation: 1,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      elevation: 6,
+      shadowColor: Colors.black.withOpacity(0.06),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min, // adapt height to content
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -66,13 +66,20 @@ class SectionCard extends StatelessWidget {
                 Expanded(
                   child: Text(title,
                       style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700)),
+                          ?.copyWith(fontWeight: FontWeight.w800)),
                 ),
                 if (trailing != null) trailing!,
               ],
             ),
-            const SizedBox(height: 8),
-            child,
+            const SizedBox(height: 10),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+              child: DefaultTextStyle.merge(
+                style: theme.textTheme.bodyMedium ?? const TextStyle(),
+                child: child,
+              ),
+            ),
           ],
         ),
       ),
@@ -80,8 +87,6 @@ class SectionCard extends StatelessWidget {
   }
 }
 
-/// Row showing label, a bar filled with a horizontal linear gradient,
-/// and value/percent text on the right.
 class _GradientDistributionRow extends StatelessWidget {
   final String label;
   final int value;
@@ -102,12 +107,13 @@ class _GradientDistributionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pctText = '${(percent * 100).round()}%';
+    final theme = Theme.of(context);
+
     return Row(
       children: [
         SizedBox(
-          width: 140,
-          child: Text(label, style: const TextStyle(fontSize: 13)),
-        ),
+            width: 140,
+            child: Text(label, style: const TextStyle(fontSize: 13))),
         const SizedBox(width: 8),
         Expanded(
           child: LayoutBuilder(builder: (ctx, constraints) {
@@ -118,12 +124,10 @@ class _GradientDistributionRow extends StatelessWidget {
                 Container(
                   height: 16,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade200,
+                    color: theme.colorScheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                // Foreground uses a gradient that fills the whole container width,
-                // but we clip it to the variable barWidth to represent the percent.
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Align(
@@ -156,21 +160,12 @@ class _GradientDistributionRow extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             if (showPercent)
               Text(pctText,
-                  style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurface.withOpacity(0.65))),
           ],
         ),
       ],
     );
-  }
-}
-
-/// Utility extension: mapIndexed for List operations
-extension _ListIndexed<E> on List<E> {
-  List<T> mapIndexed<T>(T Function(int index, E item) f) {
-    final out = <T>[];
-    for (var i = 0; i < length; i++) {
-      out.add(f(i, this[i]));
-    }
-    return out;
   }
 }

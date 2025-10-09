@@ -1,11 +1,12 @@
 // lib/screens/profile_extra_screen.dart
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter/services.dart';
-import '../services/auth_service.dart';
 import '../utils/secure_storage.dart';
+import '../services/user_service.dart';
+import '../services/auth_service.dart';
 
 class ProfileExtraScreen extends StatefulWidget {
   const ProfileExtraScreen({super.key});
@@ -32,39 +33,37 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
   String? _pendingPassword;
   String? errorText;
 
-  final String baseUrl = 'http://127.0.0.1:8000'; // adapte si nécessaire
+  String get apiBase => UserService.baseUrl.replaceAll(RegExp(r'/$'), '');
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        final routeState = GoRouterState.of(context);
-        final dynamic rawExtra = routeState.extra;
-        if (rawExtra is Map<String, dynamic>) {
-          email = rawExtra['email'] as String?;
-          username = rawExtra['username'] as String?;
-          firstName = rawExtra['first_name'] as String?;
-          lastName = rawExtra['last_name'] as String?;
-        } else if (rawExtra is Map) {
-          email = rawExtra['email']?.toString();
-          username = rawExtra['username']?.toString();
-          firstName = rawExtra['first_name']?.toString();
-          lastName = rawExtra['last_name']?.toString();
-        } else {
-          debugPrint(
-              'ProfileExtra init - no extra or unexpected type: ${rawExtra.runtimeType}');
-        }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initFromRoute());
+  }
 
-        _pendingPassword = await SecureStorage.read('pending_password');
-        debugPrint(
-            'ProfileExtra init - extra: $rawExtra, pending_password_present: ${_pendingPassword != null && _pendingPassword!.isNotEmpty}');
-      } catch (e, st) {
-        debugPrint('ProfileExtra init error: $e\n$st');
-      } finally {
-        setState(() {});
+  Future<void> _initFromRoute() async {
+    if (!mounted) return;
+    try {
+      final routeState = GoRouterState.of(context);
+      final dynamic rawExtra = routeState.extra;
+      if (rawExtra is Map<String, dynamic>) {
+        email = rawExtra['email'] as String?;
+        username = rawExtra['username'] as String?;
+        firstName = rawExtra['first_name'] as String?;
+        lastName = rawExtra['last_name'] as String?;
+      } else if (rawExtra is Map) {
+        email = rawExtra['email']?.toString();
+        username = rawExtra['username']?.toString();
+        firstName = rawExtra['first_name']?.toString();
+        lastName = rawExtra['last_name']?.toString();
       }
-    });
+
+      _pendingPassword = await SecureStorage.read('pending_password');
+      if (!mounted) return;
+      setState(() {});
+    } catch (e, st) {
+      debugPrint('ProfileExtra init error: $e\n$st');
+    }
   }
 
   @override
@@ -84,6 +83,7 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
       firstDate: DateTime(1900),
       lastDate: now,
     );
+    if (!mounted) return;
     if (picked != null) setState(() => birthDate = picked);
   }
 
@@ -100,33 +100,49 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
 
   Future<http.Response> _postProfileMultipart(
       String accessToken, Map<String, dynamic> profilePayload) async {
-    final uri = Uri.parse('$baseUrl/api/v1/profiles/');
+    final uri = Uri.parse('$apiBase/profiles/');
     final req = http.MultipartRequest('POST', uri);
     req.headers['Authorization'] = 'Bearer $accessToken';
-    // add fields as strings (exclude nulls)
     profilePayload.forEach((k, v) {
       if (v != null) req.fields[k] = v.toString();
     });
-
-    // If you want to attach a photo from bytes, uncomment and provide bytes
-    // final Uint8List? imageBytes = ...;
-    // if (imageBytes != null) {
-    //   req.files.add(http.MultipartFile.fromBytes('photo', imageBytes, filename: 'photo.jpg'));
-    // }
-
     final streamed = await req.send();
     return await http.Response.fromStream(streamed);
   }
 
   Future<void> submitExtra() async {
-    setState(() => errorText = null);
-    final missing = <String>[];
+    if (loading) return;
+    setState(() {
+      errorText = null;
+      loading = true;
+    });
+
     final pendingPwd = _pendingPassword;
 
-    if (email == null || email!.isEmpty) missing.add('email');
-    if (username == null || username!.isEmpty) missing.add('username');
-    if (pendingPwd == null || pendingPwd.isEmpty)
-      missing.add('pending_password');
+    if (email == null || email!.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        errorText = 'Email manquant';
+        loading = false;
+      });
+      return;
+    }
+    if (username == null || username!.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        errorText = 'Username manquant';
+        loading = false;
+      });
+      return;
+    }
+    if (pendingPwd == null || pendingPwd.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        errorText = 'Mot de passe manquant, revenez à l\'inscription';
+        loading = false;
+      });
+      return;
+    }
 
     final anyProfileField = phoneCtrl.text.isNotEmpty ||
         lieuCtrl.text.isNotEmpty ||
@@ -134,17 +150,14 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
         adresseCtrl.text.isNotEmpty ||
         birthDate != null ||
         (sexe != null && sexe!.isNotEmpty);
-    if (!anyProfileField) missing.add('aucun_champ_de_profil_rempli');
-
-    if (missing.isNotEmpty) {
-      final msg = 'Données manquantes: ${missing.join(', ')}';
-      debugPrint(msg);
-      setState(() => errorText = msg);
+    if (!anyProfileField) {
+      if (!mounted) return;
+      setState(() {
+        errorText = 'Complétez au moins un champ de profil';
+        loading = false;
+      });
       return;
     }
-
-    if (loading) return;
-    setState(() => loading = true);
 
     final userPayload = <String, dynamic>{
       'email': email,
@@ -161,7 +174,6 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
       if (lieuCtrl.text.isNotEmpty) 'lieu_naissance': lieuCtrl.text.trim(),
       if (cinCtrl.text.isNotEmpty) 'cin_numero': cinCtrl.text.trim(),
       if (adresseCtrl.text.isNotEmpty) 'adresse': adresseCtrl.text.trim(),
-      // CORRECTION: send only YYYY-MM-DD (backend expects this format)
       if (birthDate != null)
         'date_naissance': birthDate!.toIso8601String().split('T').first,
       if (sexe != null && sexe!.isNotEmpty) 'sexe': sexe,
@@ -172,9 +184,9 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
     debugPrint('profilePayload to send: ${jsonEncode(profilePayload)}');
 
     try {
-      // 1) Create user
+      // Create user
       final userResp = await http.post(
-        Uri.parse('$baseUrl/api/v1/auth/users/'),
+        Uri.parse('$apiBase/auth/users/'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
@@ -182,29 +194,46 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
         body: jsonEncode(userPayload),
       );
 
+      if (!mounted) return;
       debugPrint(
           'create user status=${userResp.statusCode} body=${userResp.body}');
 
       if (userResp.statusCode != 201 && userResp.statusCode != 200) {
-        final err = userResp.body.isNotEmpty
+        String serverMsg = userResp.body.isNotEmpty
             ? userResp.body
             : 'Erreur création utilisateur';
-        setState(() => errorText = 'Erreur création utilisateur: $err');
+        try {
+          final parsed = jsonDecode(userResp.body);
+          if (parsed is Map) {
+            final parts = <String>[];
+            parsed.forEach((k, v) {
+              if (v is List)
+                parts.add('$k: ${v.join(", ")}');
+              else
+                parts.add('$k: $v');
+            });
+            if (parts.isNotEmpty) serverMsg = parts.join(' ; ');
+          }
+        } catch (_) {}
         await SecureStorage.write(
             'pending_profile', jsonEncode(profilePayload));
+        if (!mounted) return;
+        setState(() {
+          errorText = 'Erreur création utilisateur: $serverMsg';
+          loading = false;
+        });
         return;
       }
 
-      // user created - remove pending password
+      // user created - delete pending_password
       await SecureStorage.delete('pending_password');
       _pendingPassword = null;
 
-      // 2) Login to get token via AuthService.login (preferred)
+      // Try login (AuthService.login expected to exist)
       String? accessToken;
       try {
         final loginResp =
-            await AuthService.login((email ?? username)!, pendingPwd!);
-        debugPrint('AuthService.login returned: $loginResp');
+            await AuthService.login((email ?? username)!, pendingPwd);
         accessToken = (loginResp['access'] as String?) ??
             (loginResp['access_token'] as String?) ??
             (loginResp['token'] as String?);
@@ -218,17 +247,18 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
         debugPrint('AuthService.login failed: $e');
       }
 
-      // fallback: try token endpoint common path if accessToken still null
+      // Fallback token endpoint
       if (accessToken == null) {
         try {
           final tokenResp = await http.post(
-            Uri.parse('$baseUrl/api/v1/token/'),
+            Uri.parse('$apiBase/token/'),
             headers: {
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
             body: jsonEncode({'email': email, 'password': pendingPwd}),
           );
+          if (!mounted) return;
           debugPrint(
               'fallback token login status=${tokenResp.statusCode} body=${tokenResp.body}');
           if (tokenResp.statusCode == 200) {
@@ -247,10 +277,11 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
         }
       }
 
-      // 3) If we have accessToken, send multipart/form-data to create profile
+      // Create profile if token available
       if (accessToken != null) {
         final profileResp =
             await _postProfileMultipart(accessToken, profilePayload);
+        if (!mounted) return;
         debugPrint(
             'profile create multipart status=${profileResp.statusCode} body=${profileResp.body}');
 
@@ -259,39 +290,53 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Inscription complète, profil créé.')));
+          if (!mounted) return;
           context.go('/');
           return;
         } else {
-          // save pending profile and inform user
           await SecureStorage.write(
               'pending_profile', jsonEncode(profilePayload));
-          setState(() => errorText =
-              'Profil non créé (server ${profileResp.statusCode}); sauvegardé localement.');
+          if (!mounted) return;
+          setState(() {
+            errorText =
+                'Profil non créé (server ${profileResp.statusCode}); sauvegardé localement.';
+            loading = false;
+          });
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content:
                   Text('Profil sauvegardé pour synchronisation ultérieure.')));
+          if (!mounted) return;
           context.go('/');
           return;
         }
       } else {
-        // No token possible: save pending_profile
         await SecureStorage.write(
             'pending_profile', jsonEncode(profilePayload));
-        setState(() => errorText =
-            'Inscription créée, mais authentification automatique impossible. Profil sauvegardé localement.');
+        if (!mounted) return;
+        setState(() {
+          errorText =
+              'Inscription créée, mais authentification automatique impossible. Profil sauvegardé localement.';
+          loading = false;
+        });
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Inscription faite. Profil sauvegardé localement.')));
+        if (!mounted) return;
         context.go('/');
         return;
       }
     } catch (e, st) {
       debugPrint('submitExtra exception: $e\n$st');
-      setState(() => errorText = 'Erreur réseau ou serveur: $e');
       await SecureStorage.write('pending_profile', jsonEncode(profilePayload));
+      if (!mounted) return;
+      setState(() {
+        errorText = 'Erreur réseau ou serveur: $e';
+        loading = false;
+      });
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (!mounted) return;
+      setState(() => loading = false);
     }
   }
 
@@ -350,14 +395,11 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(
-                            Icons.save,
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.save,
                             key: ValueKey('icon'),
                             size: 18,
-                            color: Colors.white,
-                          ),
+                            color: Colors.white),
                   ),
                   const SizedBox(width: 12),
                   AnimatedDefaultTextStyle(
@@ -451,12 +493,11 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: TextFormField(
-                              controller: phoneCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: _inputDecoration(label: 'Téléphone'),
-                            ),
-                          ),
+                              child: TextFormField(
+                                  controller: phoneCtrl,
+                                  keyboardType: TextInputType.phone,
+                                  decoration:
+                                      _inputDecoration(label: 'Téléphone'))),
                           const SizedBox(width: 12),
                           Expanded(
                             child: DropdownButtonFormField<String>(
@@ -477,7 +518,10 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
                                 DropdownMenuItem(
                                     value: 'F', child: Text('Féminin')),
                               ],
-                              onChanged: (v) => setState(() => sexe = v),
+                              onChanged: (v) {
+                                if (!mounted) return;
+                                setState(() => sexe = v);
+                              },
                             ),
                           ),
                         ],
@@ -498,23 +542,21 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
                           maxLines: 3),
                       const SizedBox(height: 12),
                       ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(birthDate == null
-                            ? 'Date de naissance'
-                            : 'Date: ${birthDate!.toLocal().toIso8601String().split("T").first}'),
-                        trailing: IconButton(
-                            icon: const Icon(Icons.calendar_today),
-                            onPressed: _pickDate),
-                      ),
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(birthDate == null
+                              ? 'Date de naissance'
+                              : 'Date: ${birthDate!.toLocal().toIso8601String().split("T").first}'),
+                          trailing: IconButton(
+                              icon: const Icon(Icons.calendar_today),
+                              onPressed: _pickDate)),
                       const SizedBox(height: 16),
                       _styledActionButton(),
                       const SizedBox(height: 12),
                       TextButton(
-                        onPressed: () {
-                          context.go('/');
-                        },
-                        child: const Text('Annuler'),
-                      ),
+                          onPressed: () {
+                            if (mounted) context.go('/');
+                          },
+                          child: const Text('Annuler')),
                     ],
                   ),
                 ),

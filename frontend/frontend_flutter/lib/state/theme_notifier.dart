@@ -4,11 +4,12 @@ import '../utils/secure_storage.dart';
 class ThemeNotifier extends ChangeNotifier {
   static const _storageKey = 'theme_mode';
   ThemeMode _mode;
+  final bool _isPersistent;
 
-  ThemeNotifier._(this._mode);
+  ThemeNotifier._(this._mode) : _isPersistent = true;
 
   // internal constructor used for non-persistent fallback instances
-  ThemeNotifier._internal(this._mode);
+  ThemeNotifier._internal(this._mode) : _isPersistent = false;
 
   ThemeMode get mode => _mode;
 
@@ -17,8 +18,10 @@ class ThemeNotifier extends ChangeNotifier {
   Future<void> toggle() async {
     _mode = (_mode == ThemeMode.dark) ? ThemeMode.light : ThemeMode.dark;
     notifyListeners();
-    await SecureStorage.write(
-        _storageKey, _mode == ThemeMode.dark ? 'dark' : 'light');
+    if (_isPersistent) {
+      await SecureStorage.write(
+          _storageKey, _mode == ThemeMode.dark ? 'dark' : 'light');
+    }
   }
 
   static Future<ThemeNotifier> init() async {
@@ -27,12 +30,14 @@ class ThemeNotifier extends ChangeNotifier {
       final mode = val == 'dark' ? ThemeMode.dark : ThemeMode.light;
       return ThemeNotifier._(mode);
     } catch (_) {
-      return ThemeNotifier._(ThemeMode.light);
+      return ThemeNotifier._internal(ThemeMode.light);
     }
   }
 
   /// Non-persistent fallback instance used when ThemeProvider is absent.
   static ThemeNotifier fallback() => ThemeNotifier._internal(ThemeMode.light);
+
+  static safeOf(BuildContext context) {}
 }
 
 /// Optional helper to access ThemeNotifier easily
@@ -51,8 +56,6 @@ class ThemeProvider extends InheritedNotifier<ThemeNotifier> {
     return provider!.notifier!;
   }
 
-  /// Safe accessor: returns the provider's notifier if present, otherwise a fallback
-  /// (fallback is non-persistent and should only be used to avoid crashes in edge cases)
   static ThemeNotifier safeOf(BuildContext context) {
     final provider =
         context.dependOnInheritedWidgetOfExactType<ThemeProvider>();

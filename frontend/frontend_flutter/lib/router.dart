@@ -86,22 +86,18 @@ GoRouter createRouter(AuthState authState) {
               const SupportScreen()),
 
       // Bank account routes
-      // '/bank-accounts' will now redirect the user to their bank account view if one exists,
-      // otherwise it opens the create screen. This uses an intermediate widget that performs the async checks.
       GoRoute(
         path: '/bank-accounts',
         builder: (BuildContext context, GoRouterState state) =>
             const _BankAccountsRedirector(),
       ),
 
-      // create route
       GoRoute(
         path: '/bank-account/create',
         builder: (BuildContext context, GoRouterState state) =>
             const BankAccountCreateScreen(),
       ),
 
-      // view route used by other places
       GoRoute(
         path: '/bank-account/view/:id',
         builder: (BuildContext context, GoRouterState state) {
@@ -116,7 +112,6 @@ GoRouter createRouter(AuthState authState) {
         },
       ),
 
-      // edit route used by actions
       GoRoute(
         path: '/bank-account/edit/:id',
         builder: (BuildContext context, GoRouterState state) {
@@ -212,7 +207,6 @@ GoRouter createRouter(AuthState authState) {
 
       // If logged in and otpVerified, allow explicitly permitted authenticated routes
       if (loggedInSync && authState.otpVerified) {
-        // If the requested route is allowed, do not override it
         if (matchesAllowedAuthenticated(uriPath)) {
           // extra guard for view/edit id validity: if route is view/edit but id invalid, redirect to bank-accounts
           if (uriPath.startsWith('/bank-account/view/') ||
@@ -271,12 +265,13 @@ class _BankAccountsRedirectorState extends State<_BankAccountsRedirector> {
   Future<void> _resolve() async {
     try {
       final profile = await AuthService.getProfile();
-      if (profile == null) {
-        // If no profile, send to login (preserve next handled by router redirect)
+      // profile may be Map or null; handle both
+      if (profile == null || profile.isEmpty) {
         if (mounted) context.go('/login');
         return;
       }
 
+      // support multiple id keys and ensure string form
       final profileId = profile['id'] ?? profile['pk'] ?? profile['uuid'];
       if (profileId == null) {
         if (mounted) context.go('/bank-account/create');
@@ -285,27 +280,26 @@ class _BankAccountsRedirectorState extends State<_BankAccountsRedirector> {
 
       final accounts =
           await AuthService.getBankAccounts(profileId: profileId.toString());
-      if (mounted) {
-        if (accounts != null && accounts.isNotEmpty) {
-          final first = accounts.first;
-          final id = first['id']?.toString();
-          if (id != null && _isValidUuid(id)) {
-            // navigate to view of existing account
-            context.go('/bank-account/view/$id');
-            return;
-          }
+      if (!mounted) return;
+
+      if (accounts != null && accounts.isNotEmpty) {
+        final first = accounts.first;
+        final id = first['id']?.toString();
+        if (id != null && _isValidUuid(id)) {
+          // navigate to view of existing account
+          context.go('/bank-account/view/$id');
+          return;
         }
-        // no account found -> go to create
-        context.go('/bank-account/create');
       }
+
+      // no account found -> go to create
+      context.go('/bank-account/create');
     } catch (e, st) {
       debugPrint('[BankAccountsRedirector] error: $e\n$st');
       if (mounted) {
         // fallback to create screen on error
         context.go('/bank-account/create');
       }
-    } finally {
-      if (mounted) ;
     }
   }
 

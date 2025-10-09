@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
+
 import '../services/auth_service.dart';
 
 class BankAccountEditScreen extends StatefulWidget {
@@ -19,19 +20,21 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _loading = true;
   bool _submitting = false;
-  bool _deleting = false;
 
   late TextEditingController _bankNameCtrl;
-  late TextEditingController _ownerNameCtrl;
-  late TextEditingController _accountNumberCtrl;
+  late TextEditingController
+      _ownerNameCtrl; // should show username (profile) when owner_name absent
+  late TextEditingController
+      _accountNumberCtrl; // sensitive; only filled if API exposes plaintext
   late TextEditingController _ibanCtrl;
-  late TextEditingController _branchCtrl;
+  late TextEditingController _agencyCtrl; // model field is 'agency'
   late TextEditingController _notesCtrl;
   bool _isPrimary = false;
-  String _currency = 'MAD';
+  String _currency = 'EUR'; // model default
 
   Map<String, dynamic>? _account;
-  bool _editable = true; // false when account is marked deleted/inactive
+  Map<String, dynamic>? _currentProfile;
+  bool _editable = true; // false when account is deleted/inactive
 
   @override
   void initState() {
@@ -40,7 +43,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
     _ownerNameCtrl = TextEditingController();
     _accountNumberCtrl = TextEditingController();
     _ibanCtrl = TextEditingController();
-    _branchCtrl = TextEditingController();
+    _agencyCtrl = TextEditingController();
     _notesCtrl = TextEditingController();
     _load();
   }
@@ -51,7 +54,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
     _ownerNameCtrl.dispose();
     _accountNumberCtrl.dispose();
     _ibanCtrl.dispose();
-    _branchCtrl.dispose();
+    _agencyCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
   }
@@ -62,10 +65,31 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
     if (acc.containsKey('is_active')) return acc['is_active'] == true;
     if (acc.containsKey('active')) return acc['active'] == true;
     final status = (acc['status'] as String?)?.toLowerCase();
-    if (status != null) {
+    if (status != null)
       return status.contains('active') || status.contains('actif');
-    }
     return true;
+  }
+
+  String _extractProfileUsername(Map<String, dynamic>? profile) {
+    if (profile == null) return '';
+    try {
+      final username = (profile['username'] as String?)?.trim();
+      if (username != null && username.isNotEmpty) return username;
+      final user = profile['user'];
+      if (user is Map) {
+        final userUsername = (user['username'] as String?)?.trim();
+        if (userUsername != null && userUsername.isNotEmpty)
+          return userUsername;
+        final userEmail = (user['email'] as String?)?.trim();
+        if (userEmail != null && userEmail.isNotEmpty) return userEmail;
+      }
+      final fullName = (profile['full_name'] as String?)?.trim() ??
+          (profile['name'] as String?)?.trim();
+      if (fullName != null && fullName.isNotEmpty) return fullName;
+      final id = profile['id']?.toString();
+      if (id != null) return id;
+    } catch (_) {}
+    return '';
   }
 
   Future<void> _load() async {
@@ -73,29 +97,40 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
     setState(() => _loading = true);
     try {
       final acc = await AuthService.getBankAccount(widget.id);
-      if (acc == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Compte introuvable')));
-          context.go('/bank-accounts');
-        }
-        return;
+      Map<String, dynamic>? profile;
+      try {
+        profile = await AuthService.getProfile();
+      } catch (_) {
+        profile = null;
       }
 
-      _account = acc;
-      _bankNameCtrl.text = (acc['bank_name'] as String?) ?? '';
-      _ownerNameCtrl.text = (acc['owner_name'] as String?) ?? '';
-      _accountNumberCtrl.text = (acc['account_number'] as String?) ?? '';
-      _ibanCtrl.text = (acc['iban'] as String?) ?? '';
-      _branchCtrl.text = (acc['branch_name'] as String?) ?? '';
-      _notesCtrl.text = (acc['notes'] as String?) ?? '';
-      _isPrimary = acc['is_primary'] == true;
-      _currency = (acc['currency'] as String?) ?? _currency;
-      _editable = _determineEditable(acc);
-      if (!_editable) {
-        debugPrint('[BankAccountEdit] account not editable (deleted/inactive)');
+      if (mounted) {
+        _account = acc;
+        _currentProfile = profile;
+
+        _bankNameCtrl.text = (acc?['bank_name'] as String?) ?? '';
+
+        final ownerName = (acc?['owner_name'] as String?)?.trim();
+        if (ownerName != null && ownerName.isNotEmpty) {
+          _ownerNameCtrl.text = ownerName;
+        } else {
+          _ownerNameCtrl.text = _extractProfileUsername(profile);
+        }
+
+        _accountNumberCtrl.text = (acc?['account_number'] as String?) ?? '';
+        _ibanCtrl.text = (acc?['iban'] as String?) ??
+            (acc?['iban_normalized'] as String?) ??
+            '';
+        _agencyCtrl.text = (acc?['agency'] as String?) ??
+            (acc?['branch_name'] as String?) ??
+            '';
+        _notesCtrl.text = (acc?['notes'] as String?) ?? '';
+        _isPrimary = acc?['is_primary'] == true;
+        _currency = (acc?['currency'] as String?) ?? _currency;
+        _editable = acc != null ? _determineEditable(acc) : true;
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[BankAccountEdit] load error: $e\n$st');
       if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Erreur chargement: $e')));
@@ -127,6 +162,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
       }
 
       final payload = <String, dynamic>{};
+
       void addIfChanged(String key, String? newValue) {
         final old = (existing[key] as String?) ?? '';
         if ((newValue ?? '').trim() != old.trim())
@@ -137,7 +173,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
       addIfChanged('owner_name', _ownerNameCtrl.text);
       addIfChanged('account_number', _accountNumberCtrl.text);
       addIfChanged('iban', _ibanCtrl.text);
-      addIfChanged('branch_name', _branchCtrl.text);
+      addIfChanged('agency', _agencyCtrl.text);
       addIfChanged('notes', _notesCtrl.text);
 
       if ((_isPrimary != (existing['is_primary'] == true)))
@@ -210,6 +246,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
           for (final k in payload.keys) {
             final newVal = payload[k];
             final remoteVal = fresh[k];
+
             if (newVal is bool) {
               if (remoteVal == newVal) continue;
               persisted = false;
@@ -218,6 +255,15 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
               final sNew = (newVal ?? '').toString().trim();
               final sRem = (remoteVal ?? '').toString().trim();
               if (sNew == sRem) continue;
+
+              if (k == 'iban') {
+                final normalizedSent =
+                    sNew.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+                final serverNormalized =
+                    (fresh['iban_normalized'] as String?) ?? '';
+                if (normalizedSent == serverNormalized) continue;
+              }
+
               persisted = false;
               break;
             }
@@ -265,8 +311,8 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
       if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Erreur serveur: $err')));
-    } catch (e) {
-      debugPrint('[BankAccountEdit] submit error: $e');
+    } catch (e, st) {
+      debugPrint('[BankAccountEdit] submit error: $e\n$st');
       if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Erreur: $e')));
@@ -281,7 +327,6 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
     final primaryColor = theme.colorScheme.primary;
     final dangerColor = Colors.red;
 
-    // Styles: smaller buttons, rounded, coherent with other screens
     final ButtonStyle elevatedStyle = ElevatedButton.styleFrom(
       foregroundColor: Colors.white,
       backgroundColor: primaryColor,
@@ -299,13 +344,6 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
       minimumSize: const Size(120, 44),
     );
 
-    final ButtonStyle textStyle = TextButton.styleFrom(
-      foregroundColor: primaryColor,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-      minimumSize: const Size(120, 44),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    );
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Modifier le compte'),
@@ -313,7 +351,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
           IconButton(
               tooltip: 'Actualiser',
               icon: const Icon(Icons.refresh),
-              onPressed: _load)
+              onPressed: _load),
         ],
       ),
       body: _loading
@@ -347,19 +385,28 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
                             const SizedBox(height: 12),
                             TextFormField(
                               controller: _ownerNameCtrl,
-                              decoration:
-                                  const InputDecoration(labelText: 'Titulaire'),
+                              decoration: InputDecoration(
+                                labelText: 'Titulaire (nom d\'utilisateur)',
+                                helperText: (_account != null &&
+                                        (_account?['owner_name'] as String?)
+                                                ?.isNotEmpty !=
+                                            true)
+                                    ? 'Nom d\'utilisateur courant: ${_extractProfileUsername(_currentProfile)}'
+                                    : null,
+                              ),
                               enabled: _editable,
                             ),
                             const SizedBox(height: 12),
                             TextFormField(
                               controller: _accountNumberCtrl,
-                              decoration: const InputDecoration(
-                                  labelText: 'Numéro de compte'),
+                              decoration: InputDecoration(
+                                labelText:
+                                    'Numéro de compte (laisser vide pour ne pas modifier)',
+                                helperText:
+                                    _account?['masked_account'] as String? ??
+                                        '',
+                              ),
                               keyboardType: TextInputType.text,
-                              validator: (v) => (v == null || v.trim().isEmpty)
-                                  ? 'Requis'
-                                  : null,
                               enabled: _editable,
                             ),
                             const SizedBox(height: 12),
@@ -370,9 +417,9 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
                                 enabled: _editable),
                             const SizedBox(height: 12),
                             TextFormField(
-                                controller: _branchCtrl,
-                                decoration: const InputDecoration(
-                                    labelText: 'Agence / Succursale'),
+                                controller: _agencyCtrl,
+                                decoration:
+                                    const InputDecoration(labelText: 'Agence'),
                                 enabled: _editable),
                             const SizedBox(height: 12),
                             Row(
@@ -380,7 +427,7 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
                                 Expanded(
                                   child: DropdownButtonFormField<String>(
                                     value: _currency,
-                                    items: ['MAD', 'EUR', 'USD']
+                                    items: ['EUR', 'MAD', 'USD']
                                         .map((c) => DropdownMenuItem(
                                             value: c, child: Text(c)))
                                         .toList(),
@@ -417,8 +464,6 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
                                 maxLines: 4,
                                 enabled: _editable),
                             const SizedBox(height: 18),
-
-                            // Buttons row: Save | Cancel — centered, smaller, side-by-side
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -437,11 +482,10 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
                                                 color: Colors.white))
                                         : const Icon(Icons.save, size: 18),
                                     label: const Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 6),
-                                      child: Text('Enregistrer',
-                                          style: TextStyle(fontSize: 14)),
-                                    ),
+                                        padding:
+                                            EdgeInsets.symmetric(vertical: 6),
+                                        child: Text('Enregistrer',
+                                            style: TextStyle(fontSize: 14))),
                                     style: elevatedStyle,
                                   ),
                                 ),
@@ -453,11 +497,10 @@ class _BankAccountEditScreenState extends State<BankAccountEditScreen> {
                                         context.go('/bank-accounts'),
                                     style: outlinedStyle,
                                     child: const Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 6),
-                                      child: Text('Annuler',
-                                          style: TextStyle(fontSize: 14)),
-                                    ),
+                                        padding:
+                                            EdgeInsets.symmetric(vertical: 6),
+                                        child: Text('Annuler',
+                                            style: TextStyle(fontSize: 14))),
                                   ),
                                 ),
                               ],

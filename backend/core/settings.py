@@ -1,9 +1,3 @@
-"""
-Django settings for core project.
-
-Cleaned, consolidated and ready for development.
-Adjust secrets and production flags via the .env file.
-"""
 import json
 import os
 from pathlib import Path
@@ -202,4 +196,8 @@ if SHOW_SQL:
 # Limit upload size in bytes if needed (example: 10MB)
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", 10485760))
 
+
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
 # End of settings

@@ -1,3 +1,4 @@
+// lib/widgets/stat_card.dart
 import 'package:flutter/material.dart';
 
 class StatCard extends StatelessWidget {
@@ -17,28 +18,27 @@ class StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    // Keep cards compact but readable
     return ConstrainedBox(
-      constraints: const BoxConstraints(
-          minWidth: 120, maxWidth: 340, minHeight: 72, maxHeight: 120),
+      constraints: const BoxConstraints(minWidth: 120, maxWidth: 340),
       child: Card(
-        elevation: 1,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min, // shrink to content
             children: [
               if (icon != null)
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(icon, color: color, size: 20),
+                  child: Icon(icon, color: color, size: 22),
                 ),
               if (icon != null) const SizedBox(width: 12),
               Expanded(
@@ -51,22 +51,20 @@ class StatCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: textTheme.bodySmall?.copyWith(
-                          color: const Color.fromARGB(103, 138, 109, 217)),
+                          color: textTheme.bodySmall?.color?.withOpacity(0.85)),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       value,
                       style: textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                        color: Colors.black87,
-                      ),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                          color: Colors.black87),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              // affordance
               Icon(Icons.chevron_right, color: Colors.grey[400], size: 18),
             ],
           ),

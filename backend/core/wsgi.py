@@ -11,8 +11,6 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 from django.conf import settings
-print("SERVER DB:", settings.DATABASES)
-print("SERVER FERNET_KEYS:", getattr(settings, "FERNET_KEYS", None))
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 

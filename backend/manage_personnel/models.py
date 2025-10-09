@@ -108,6 +108,9 @@ class Profile(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True, help_text="Actif pour le service (auto/dé)activation")
+    last_active_at = models.DateTimeField(null=True, blank=True, help_text="Dernier accès connu")
+
 
     @property
     def age(self):

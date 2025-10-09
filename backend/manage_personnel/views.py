@@ -1,15 +1,24 @@
+# views.py
+import logging
+from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.db.models import Q
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.exceptions import ValidationError
-from django.db import transaction
+from rest_framework.views import APIView
+from rest_framework.throttling import AnonRateThrottle
+
 from .models import Profile, Personnel
 from .serializers import ProfileSerializer, PersonnelSerializer
-import logging
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
+
 
 class ProfileViewSet(viewsets.ModelViewSet):
     queryset = Profile.objects.all()
@@ -92,3 +101,44 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         if user and (user.is_staff or user.is_superuser):
             return qs
         return qs.filter(profile__user=user)
+
+
+class UserExistsView(APIView):
+    """
+    Public endpoint to check whether a username and/or email already exists.
+
+    GET params:
+      - username (optional)
+      - email (optional)
+
+    Returns:
+      - 400 if neither username nor email provided
+      - 200 {"exists": bool} otherwise
+
+    Notes:
+      - Permission is AllowAny to let frontends perform client-side checks.
+      - Throttling via AnonRateThrottle is applied to limit enumeration attempts.
+      - Case-insensitive comparison using iexact.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
+
+    def get(self, request, *args, **kwargs):
+        username = request.query_params.get('username')
+        email = request.query_params.get('email')
+
+        if not username and not email:
+            return Response(
+                {"detail": "Provide username or email as query parameter."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Build OR query; returns True if any match
+        qs = User.objects.none()
+        if username:
+            qs = qs | User.objects.filter(username__iexact=username)
+        if email:
+            qs = qs | User.objects.filter(email__iexact=email)
+
+        exists = qs.exists()
+        return Response({"exists": exists}, status=status.HTTP_200_OK)

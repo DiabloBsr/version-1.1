@@ -1,4 +1,6 @@
 // lib/screens/dashboard_screen.dart
+// ignore_for_file: unused_local_variable, unused_field, unnecessary_null_comparison
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,8 @@ import '../auth_state.dart';
 import '../utils/secure_storage.dart';
 import '../services/auth_service.dart';
 import '../state/theme_notifier.dart';
+import '../widgets/section_card.dart';
+import '../widgets/stat_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -24,6 +28,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = true;
   String _activeRoute = '/dashboard';
   final bool _navExpanded = true;
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  // lifecycle guard
+  bool _disposed = false;
+
+  // Breakpoints used across the screen
+  static const double narrowWidth = 720;
+  static const double mediumWidth = 1024;
 
   @override
   void initState() {
@@ -31,7 +43,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadSummary();
   }
 
+  @override
+  void dispose() {
+    _disposed = true;
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool get _canUpdate => mounted && !_disposed;
+
+  Future<void> _safeGo(String route) async {
+    if (!_canUpdate) return;
+    if (mounted) {
+      Future.microtask(() {
+        if (!mounted) return;
+        try {
+          context.go(route);
+        } catch (_) {}
+      });
+    }
+  }
+
   Future<void> _loadSummary() async {
+    if (!_canUpdate) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -39,20 +73,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
 
     final access = await SecureStorage.read('access');
+    if (!_canUpdate) return;
     if (access == null || access.isEmpty) {
+      if (!_canUpdate) return;
       setState(() {
         _error = 'Token manquant. Veuillez vous reconnecter.';
         _loading = false;
       });
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) context.go('/login');
-      });
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (!_canUpdate) return;
+      _safeGo('/login');
       return;
     }
 
     try {
       final data = await _service.fetchDashboardSummary();
+      if (!_canUpdate) return;
       final summary = DashboardSummary.fromJson(data);
+      if (!_canUpdate) return;
       setState(() {
         _futureSummary = Future.value(summary);
         _loading = false;
@@ -61,8 +99,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       debugPrint('[Dashboard] fetch error: $e\n$st');
 
       final refreshed = await AuthService.refreshTokens();
+      if (!_canUpdate) return;
       if (refreshed) {
-        if (mounted) return _loadSummary();
+        if (!_canUpdate) return;
+        return _loadSummary();
       }
 
       try {
@@ -70,14 +110,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         await auth.clearAll();
       } catch (_) {}
 
+      if (!_canUpdate) return;
       setState(() {
         _error = e.toString();
         _loading = false;
       });
 
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (mounted) context.go('/login');
-      });
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!_canUpdate) return;
+      _safeGo('/login');
     }
   }
 
@@ -90,47 +131,114 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _onNavigate(String route) {
+    if (!_canUpdate) return;
     setState(() => _activeRoute = route);
-    if (!kIsWeb) Navigator.pop(context);
-    context.go(route);
+    if (!kIsWeb && mounted) Navigator.pop(context);
+    if (!_canUpdate) return;
+    try {
+      context.go(route);
+    } catch (e, st) {
+      debugPrint('Navigation failed: $e\n$st');
+    }
   }
 
-  Widget _sideNav(bool expanded, String userEmail, ThemeData theme) {
-    final effectiveWidth = expanded ? 220.0 : 72.0;
+  // Heuristics to compute active users and "new this month" from summary data.
+  // Assumptions:
+  // - DashboardSummary may expose a users list (summary.users) where each user map contains:
+  //    'is_active' (bool) and 'date_joined' (ISO string) or 'created_at'
+  // - If summary already provides aggregated counts (summary.activePersonnel, summary.newThisMonth),
+  //   we prefer those fields.
+  int _computeActiveFromSummary(DashboardSummary s) {
+    try {
+      // prefer provided aggregate
+      final provided = s.activePersonnel;
+      if (provided != null) return provided;
+    } catch (_) {}
+    try {
+      final users = s.users;
+      if (users is List) {
+        return users.where((u) {
+          try {
+            final isActive = (u['is_active'] ?? u['active'] ?? false) as bool;
+            return isActive;
+          } catch (_) {
+            return false;
+          }
+        }).length;
+      }
+    } catch (_) {}
+    // fallback to summary.activePersonnel if non-null, else 0
+    return (s.activePersonnel);
+  }
+
+  int _computeNewThisMonthFromSummary(DashboardSummary s) {
+    try {
+      final provided = s.newThisMonth;
+      if (provided != null) return provided;
+    } catch (_) {}
+    try {
+      final users = s.users;
+      if (users is List) {
+        final now = DateTime.now();
+        final year = now.year;
+        final month = now.month;
+        return users.where((u) {
+          try {
+            final raw = u['date_joined'] ??
+                u['created_at'] ??
+                u['created'] ??
+                u['date'];
+            if (raw == null) return false;
+            final dt = DateTime.parse(raw.toString());
+            return dt.year == year &&
+                dt.month == month &&
+                dt.isBefore(now.add(const Duration(seconds: 1)));
+          } catch (_) {
+            return false;
+          }
+        }).length;
+      }
+    } catch (_) {}
+    // fallback
+    return (s.newThisMonth);
+  }
+
+  Widget _sideNavExpanded(bool expanded, String userEmail, ThemeData theme) {
+    final effectiveWidth = expanded ? 240.0 : 72.0;
     return Container(
       width: effectiveWidth,
-      color: Colors.blue.shade800,
+      color: Colors.blue.shade900,
       child: SafeArea(
         child: Column(
           children: [
             Padding(
               padding: EdgeInsets.symmetric(
-                  horizontal: expanded ? 14 : 8, vertical: 12),
+                  horizontal: expanded ? 16 : 8, vertical: 16),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                        color: Colors.white24, shape: BoxShape.circle),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.white30, shape: BoxShape.circle),
                     child: const Icon(Icons.business,
-                        color: Colors.white, size: 24),
+                        color: Colors.white, size: 28),
                   ),
                   if (expanded)
                     Expanded(
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 12),
+                        padding: const EdgeInsets.only(left: 16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text('BotaApp',
                                 style: TextStyle(
                                     color: Colors.white,
-                                    fontSize: 16,
+                                    fontSize: 18,
                                     fontWeight: FontWeight.bold)),
                             const SizedBox(height: 4),
                             Text(userEmail,
                                 style: const TextStyle(
-                                    color: Colors.white70, fontSize: 12),
+                                    color: Colors.white70, fontSize: 13),
                                 overflow: TextOverflow.ellipsis),
                           ],
                         ),
@@ -140,7 +248,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             const Divider(color: Colors.white24, height: 1),
-            const SizedBox(height: 6),
+            const SizedBox(height: 12),
             _HoverNavItem(
                 icon: Icons.dashboard,
                 label: 'Dashboard',
@@ -179,27 +287,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const Spacer(),
             Padding(
               padding: EdgeInsets.symmetric(
-                  horizontal: expanded ? 12 : 6, vertical: 12),
+                  horizontal: expanded ? 16 : 8, vertical: 16),
               child: SizedBox(
                 width: double.infinity,
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white10,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
                     padding: const EdgeInsets.symmetric(
-                        vertical: 10, horizontal: 12),
+                        vertical: 12, horizontal: 12),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
+                        borderRadius: BorderRadius.circular(10)),
+                    minimumSize: const Size(0, 44),
                   ),
                   onPressed: () async {
+                    if (!_canUpdate) return;
                     try {
                       final auth = AuthProvider.of(context);
                       await auth.clearAll();
                     } catch (_) {}
-                    context.go('/login');
+                    if (!_canUpdate) return;
+                    _safeGo('/login');
                   },
-                  icon: const Icon(Icons.logout, color: Colors.white),
-                  label: const Expanded(
+                  icon: const Icon(Icons.logout, size: 18),
+                  label: FittedBox(
                       child: Text('Se déconnecter',
                           overflow: TextOverflow.ellipsis)),
                 ),
@@ -213,51 +324,246 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _statCards(
-      DashboardSummary summary, ThemeData theme, double maxWidth) {
+      DashboardSummary summary, ThemeData theme, double contentWidth) {
+    // compute dynamic values
+    final totalUsers = summary.totalUsers ??
+        (summary.users is List ? (summary.users as List).length : 0);
+    final activePersonnel = _computeActiveFromSummary(summary);
+    final newThisMonth = _computeNewThisMonthFromSummary(summary);
+
+    // build cards. make "Total utilisateurs" clickable -> navigate to '/users' (admin list)
     final cards = [
-      _StatCard(
-        title: "Total utilisateurs",
-        value: summary.totalUsers.toString(),
-        color: theme.colorScheme.primary,
-        icon: Icons.people,
+      GestureDetector(
+        onTap: () {
+          if (!_canUpdate) return;
+          try {
+            context.go('/users'); // route showing full list of users
+          } catch (e) {
+            debugPrint('Navigation to /users failed: $e');
+          }
+        },
+        child: StatCard(
+          title: "Total utilisateurs",
+          value: totalUsers.toString(),
+          color: theme.colorScheme.primary,
+          icon: Icons.people,
+        ),
       ),
-      _StatCard(
-        title: "Personnel actif",
-        value: summary.activePersonnel.toString(),
-        color: Colors.green,
-        icon: Icons.check_circle,
-      ),
-      _StatCard(
-        title: "Nouveaux ce mois",
-        value: summary.newThisMonth.toString(),
-        color: Colors.orange,
-        icon: Icons.add,
-      ),
+      StatCard(
+          title: "Personnel actif",
+          value: activePersonnel.toString(),
+          color: Colors.green.shade600,
+          icon: Icons.check_circle),
+      StatCard(
+          title: "Nouveaux ce mois",
+          value: newThisMonth.toString(),
+          color: Colors.orange.shade600,
+          icon: Icons.add),
     ];
 
-    final int columns = maxWidth >= 1400
-        ? 4
-        : (maxWidth >= 1100 ? 3 : (maxWidth >= 800 ? 2 : 1));
+    const gap = 16.0;
+    final available = contentWidth;
+    final int columns = available >= 1200 ? 3 : (available >= 800 ? 2 : 1);
+    final double cardMaxWidth = (available - gap * (columns - 1)) / columns;
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: cards.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: columns,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 4.0,
-      ),
-      itemBuilder: (context, index) => cards[index],
+    return Wrap(
+      spacing: gap,
+      runSpacing: gap,
+      children: cards.map((c) {
+        return ConstrainedBox(
+          constraints: BoxConstraints(minWidth: 120, maxWidth: cardMaxWidth),
+          child: c,
+        );
+      }).toList(),
     );
   }
 
-  Widget _buildContent(DashboardSummary summary) {
+  Widget _emptyPlaceholder(BuildContext context, String text,
+      {IconData icon = Icons.inbox}) {
     final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon,
+              size: 48, color: theme.colorScheme.primary.withOpacity(0.12)),
+          const SizedBox(height: 12),
+          Text(text,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: Colors.grey[600])),
+        ],
+      ),
+    );
+  }
 
+  Widget _buildHeader(
+      double contentWidth, ThemeData theme, String userEmail, bool hideTitle) {
+    final ThemeNotifier? tn = ThemeNotifier.safeOf(context);
+    final bool isDark = tn?.isDark ?? (theme.brightness == Brightness.dark);
+
+    return Material(
+      elevation: 4,
+      color: theme.colorScheme.surface,
+      child: Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        alignment: Alignment.center,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: contentWidth),
+            child: Row(
+              children: [
+                if (!hideTitle)
+                  Expanded(
+                    child: Text('Tableau de bord RH',
+                        style: theme.textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                  )
+                else
+                  const Spacer(),
+                Flexible(
+                  flex: 0,
+                  child: SizedBox(
+                    width: contentWidth >= 800
+                        ? 420
+                        : (contentWidth >= 600 ? 320 : 160),
+                    child: TextField(
+                      controller: _searchCtrl,
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 12),
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        hintText: 'Rechercher...',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none),
+                        filled: true,
+                        fillColor: theme.colorScheme.surfaceVariant,
+                        isDense: true,
+                      ),
+                      onSubmitted: (q) {
+                        if (!_canUpdate) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Recherche: $q')));
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                    onPressed: () {},
+                    icon: Icon(Icons.notifications_none,
+                        color: theme.iconTheme.color)),
+                IconButton(
+                  tooltip: isDark ? 'Passer en clair' : 'Passer en sombre',
+                  onPressed: () {
+                    if (!_canUpdate) return;
+                    if (tn != null) tn.toggle();
+                  },
+                  icon: Icon(
+                      isDark
+                          ? Icons.wb_sunny_outlined
+                          : Icons.nights_stay_outlined,
+                      color: theme.iconTheme.color),
+                ),
+                const SizedBox(width: 12),
+                CircleAvatar(
+                  backgroundColor: theme.colorScheme.primary,
+                  child: Text(
+                      (userEmail.isNotEmpty ? userEmail[0].toUpperCase() : 'U'),
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: Colors.white)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Vertical bar chart widget centered inside the SectionCard
+  Widget _verticalBarChart({
+    required Map<String, int> data,
+    required Map<String, String> labels,
+    required List<Color> barColors,
+    double height = 220,
+  }) {
+    final entries = data.entries.toList();
+    final totalMax =
+        entries.map((e) => e.value).fold<int>(0, (a, b) => a > b ? a : b);
+    final maxValue = totalMax > 0 ? totalMax : 1;
+    return LayoutBuilder(builder: (context, constraints) {
+      final theme = Theme.of(context);
+      final barCount = entries.length;
+      final spacing = 12.0;
+      final availableWidth = constraints.maxWidth;
+      final barWidth = ((availableWidth - spacing * (barCount - 1)) / barCount)
+          .clamp(32.0, 120.0);
+      return SizedBox(
+        height: height,
+        child: Center(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: entries.map((e) {
+                final label =
+                    labels.containsKey(e.key) ? labels[e.key]! : e.key;
+                final value = e.value;
+                final pct = value / maxValue;
+                final barHeight = (pct * (height - 48)).clamp(6.0, height - 48);
+                final color =
+                    barColors[(entries.indexOf(e)) % barColors.length];
+                return Padding(
+                  padding:
+                      EdgeInsets.only(right: entries.last == e ? 0 : spacing),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(value.toString(), style: theme.textTheme.bodySmall),
+                      const SizedBox(height: 6),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: barWidth,
+                        height: barHeight,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                              colors: [
+                                color.withOpacity(0.95),
+                                color.withOpacity(0.7)
+                              ],
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: barWidth + 4,
+                        child: Text(label,
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _buildContentBody(DashboardSummary summary, double contentWidth) {
+    final theme = Theme.of(context);
     final ageLabels = {
-      "20_30": "0–30",
+      "20_30": "20–30",
       "31_40": "31–40",
       "41_50": "41–50",
       "51_55": "51–55",
@@ -271,110 +577,164 @@ class _DashboardScreenState extends State<DashboardScreen> {
       "divorced": "Divorcé(e)",
     };
 
-    final gradientColors = [
-      const Color.fromARGB(255, 47, 151, 193),
-      const Color.fromARGB(255, 24, 40, 145),
-      const Color.fromARGB(255, 1, 22, 43),
-    ];
-
-    return LayoutBuilder(builder: (context, constraints) {
-      final width = constraints.maxWidth;
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    return RefreshIndicator(
+      onRefresh: _loadSummary,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: SizedBox(
-                width:
-                    width > 900 ? 340 : (width > 600 ? 300 : double.infinity),
-                child: Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    child: Row(
-                      children: [
-                        Icon(Icons.search,
-                            color: theme.iconTheme.color?.withOpacity(0.9),
-                            size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            style: theme.textTheme.bodyMedium,
-                            decoration: InputDecoration(
-                              border: InputBorder.none,
-                              hintText: 'Rechercher...',
-                              hintStyle: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurface
-                                      .withOpacity(0.5)),
-                            ),
-                            onSubmitted: (q) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Recherche: $q')));
-                            },
-                          ),
-                        ),
-                        IconButton(
-                            onPressed: () {},
-                            icon: Icon(Icons.filter_list,
-                                color: theme.iconTheme.color)),
-                      ],
-                    ),
+            ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: contentWidth),
+                child: _statCards(summary, theme, contentWidth)),
+            const SizedBox(height: 24),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: contentWidth),
+              child: SectionCard(
+                title: "Répartition par âge",
+                child: Center(
+                  child: _verticalBarChart(
+                    data: summary.ageDistribution
+                        .map((k, v) => MapEntry(k, v as int)),
+                    labels: ageLabels,
+                    barColors: [Colors.blue.shade600, Colors.blue.shade600],
+                    height: 220,
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            _statCards(summary, theme, width),
-            const SizedBox(height: 12),
-            GridView.count(
-              crossAxisCount: width > 1100 ? 2 : 1,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _SectionCard(
-                  title: "Répartition par âge",
-                  data: summary.ageDistribution
-                      .map((k, v) => MapEntry(k, v as int)),
-                  labels: ageLabels,
-                  gradientColors: gradientColors,
+            const SizedBox(height: 16),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: contentWidth),
+              child: SectionCard(
+                title: "Situation matrimoniale",
+                child: Center(
+                  child: _verticalBarChart(
+                    data: summary.maritalStatus
+                        .map((k, v) => MapEntry(k, v as int)),
+                    labels: maritalLabels,
+                    barColors: [Colors.teal.shade600, Colors.teal.shade500],
+                    height: 180,
+                  ),
                 ),
-                _SectionCard(
-                  title: "Situation matrimoniale",
-                  data: summary.maritalStatus
-                      .map((k, v) => MapEntry(k, v as int)),
-                  labels: maritalLabels,
-                  gradientColors: gradientColors,
-                ),
-                _SectionCardList(
-                  title: "Derniers arrivés",
-                  items: summary.recentPersonnel,
-                ),
-                _SectionCardList(
-                  title: "Anniversaires à venir",
-                  items: summary.upcomingBirthdays,
-                  leadingIcon: Icons.cake,
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: contentWidth),
+              child: SectionCard(
+                title: "Derniers arrivés",
+                child: summary.recentPersonnel.isEmpty
+                    ? _emptyPlaceholder(context, 'Aucun personnel récent',
+                        icon: Icons.group)
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children:
+                            List.generate(summary.recentPersonnel.length, (i) {
+                          final p = summary.recentPersonnel[i];
+                          final name = (p['name'] ?? 'Inconnu').toString();
+                          final subtitle =
+                              (p['role'] ?? p['date'] ?? '').toString();
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                dense: false,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 6, horizontal: 8),
+                                leading: CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor: theme.colorScheme.primary
+                                      .withOpacity(0.12),
+                                  child: Text(
+                                      name.isNotEmpty
+                                          ? name[0].toUpperCase()
+                                          : '?',
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                              color:
+                                                  theme.colorScheme.primary)),
+                                ),
+                                title: Text(name,
+                                    style: theme.textTheme.bodyLarge?.copyWith(
+                                        fontWeight: FontWeight.w700)),
+                                subtitle: subtitle.isNotEmpty
+                                    ? Text(subtitle,
+                                        style: theme.textTheme.bodySmall)
+                                    : null,
+                                trailing: const Icon(Icons.chevron_right,
+                                    color: Colors.grey),
+                                onTap: () {/* open profile */},
+                              ),
+                              if (i < summary.recentPersonnel.length - 1)
+                                const Divider(height: 1),
+                            ],
+                          );
+                        }),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: contentWidth),
+              child: SectionCard(
+                title: "Anniversaires à venir",
+                child: summary.upcomingBirthdays.isEmpty
+                    ? _emptyPlaceholder(context, 'Aucun anniversaire à venir',
+                        icon: Icons.cake)
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(
+                            summary.upcomingBirthdays.length, (i) {
+                          final p = summary.upcomingBirthdays[i];
+                          final name = (p['name'] ?? 'Inconnu').toString();
+                          final date = (p['date'] ?? '').toString();
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                dense: false,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 6, horizontal: 8),
+                                leading: const Icon(Icons.cake, size: 28),
+                                title: Text(name,
+                                    style: theme.textTheme.bodyLarge?.copyWith(
+                                        fontWeight: FontWeight.w700)),
+                                subtitle: date.isNotEmpty
+                                    ? Text(date,
+                                        style: theme.textTheme.bodySmall)
+                                    : null,
+                                trailing: const Icon(Icons.chevron_right,
+                                    color: Colors.grey),
+                                onTap: () {/* open profile */},
+                              ),
+                              if (i < summary.upcomingBirthdays.length - 1)
+                                const Divider(height: 1),
+                            ],
+                          );
+                        }),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 32),
           ],
         ),
-      );
-    });
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = _safeAuthState();
     if (auth != null && !auth.loggedIn) {
-      Future.microtask(() => context.go('/login'));
+      if (_canUpdate) {
+        Future.microtask(() {
+          if (!mounted) return;
+          try {
+            context.go('/login');
+          } catch (_) {}
+        });
+      }
     }
 
     if (_loading) {
@@ -383,10 +743,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (_error != null) {
       return Scaffold(
-          body: Center(
-              child: Text("Erreur: $_error",
-                  style:
-                      TextStyle(color: Theme.of(context).colorScheme.error))));
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text("Erreur: $_error",
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                  onPressed: _loadSummary, child: const Text('Réessayer')),
+            ],
+          ),
+        ),
+      );
     }
 
     return FutureBuilder<DashboardSummary?>(
@@ -398,152 +767,270 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
         if (snapshot.hasError) {
           return Scaffold(
-              body: Center(
-                  child: Text("Erreur: ${snapshot.error}",
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text("Erreur: ${snapshot.error}",
                       style: TextStyle(
-                          color: Theme.of(context).colorScheme.error))));
+                          color: Theme.of(context).colorScheme.error)),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                      onPressed: _loadSummary, child: const Text('Réessayer')),
+                ],
+              ),
+            ),
+          );
         }
 
         final summary = snapshot.data!;
         final userEmail = auth?.userEmail ?? '';
         final theme = Theme.of(context);
-        final themeNotifier = ThemeProvider.safeOf(context);
+        final ThemeNotifier? themeNotifier = ThemeNotifier.safeOf(context);
 
+        // compute contentWidth consistent with header/search field and sections
+        final screenWidth = MediaQuery.of(context).size.width;
+        const horizontalPadding = 24.0;
+        final sideNavWidth = (kIsWeb && screenWidth > 1400) ? 240.0 : 0.0;
+        final contentAvailable =
+            screenWidth - sideNavWidth - horizontalPadding * 2;
+        final double contentWidth =
+            contentAvailable > 1200 ? 1200 : contentAvailable;
+
+        // Decide whether to hide the big header title:
+        final bool hideHeaderTitle = screenWidth <= 480 || contentWidth < 520;
+
+        // Footer: responsive
         final footer = Container(
-          color: theme.scaffoldBackgroundColor,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Expanded(
+          color: theme.colorScheme.surfaceVariant,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: LayoutBuilder(builder: (context, constraints) {
+            return Row(
+              children: [
+                Expanded(
                   child: Text('© ${DateTime.now().year} BotaApp — Gestion RH',
-                      style: theme.textTheme.bodyMedium)),
-              Wrap(
-                spacing: 8,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.business,
-                        size: 16, color: Colors.white),
-                    label: const Text('LinkedIn',
-                        style: TextStyle(color: Colors.white)),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0A66C2)),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ),
+                ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxWidth: constraints.maxWidth * 0.6),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.end,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: ElevatedButton.icon(
+                          onPressed: () {},
+                          icon: const Icon(Icons.business, size: 16),
+                          label: const Text('LinkedIn'),
+                          style: ElevatedButton.styleFrom(
+                              minimumSize: const Size(0, 36),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12)),
+                        ),
+                      ),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: OutlinedButton.icon(
+                          onPressed: () {},
+                          icon: const Icon(Icons.code, size: 16),
+                          label: const Text('GitHub'),
+                          style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 36),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12)),
+                        ),
+                      ),
+                    ],
                   ),
-                  OutlinedButton.icon(
-                      onPressed: () {},
-                      icon: Icon(Icons.code, color: theme.iconTheme.color),
-                      label: Text('GitHub', style: theme.textTheme.bodySmall)),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            );
+          }),
         );
 
-        return LayoutBuilder(builder: (context, constraints) {
-          final useFixedNav = kIsWeb || constraints.maxWidth >= 900;
-          final navExpanded = _navExpanded && (constraints.maxWidth >= 1100);
+        final useFixedNav = kIsWeb || MediaQuery.of(context).size.width >= 900;
+        final navExpanded =
+            _navExpanded && (MediaQuery.of(context).size.width >= 1100);
 
-          if (useFixedNav) {
-            return Scaffold(
-              bottomNavigationBar: footer,
-              body: Row(
-                children: [
-                  _sideNav(navExpanded, userEmail, theme),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Material(
-                          elevation: 2,
-                          child: Container(
-                            height: 64,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Row(
-                              children: [
-                                const SizedBox(width: 24),
-                                Expanded(
-                                    child: Center(
-                                        child: Text('Tableau de bord RH',
-                                            style:
-                                                theme.textTheme.titleLarge))),
-                                Row(
+        if (useFixedNav) {
+          return Scaffold(
+            bottomNavigationBar: footer,
+            body: Row(
+              children: [
+                _sideNavExpanded(navExpanded, userEmail, theme),
+                Expanded(
+                  child: Column(
+                    children: [
+                      // Fixed header - pass hideHeaderTitle flag
+                      _buildHeader(
+                          contentWidth, theme, userEmail, hideHeaderTitle),
+                      Expanded(child: _buildContentBody(summary, contentWidth)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        } else {
+          // mobile / overlay navigation
+          return Scaffold(
+            bottomNavigationBar: footer,
+            appBar: AppBar(
+              title: LayoutBuilder(builder: (context, constraints) {
+                if (hideHeaderTitle) return const SizedBox.shrink();
+                final showLargeTitle = constraints.maxWidth >= 520;
+                return Text('Tableau de bord RH',
+                    style: showLargeTitle
+                        ? theme.textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold)
+                        : theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold));
+              }),
+              actions: [
+                LayoutBuilder(builder: (context, constraints) {
+                  final narrow = constraints.maxWidth < 560;
+                  if (narrow) {
+                    final bool isDark = themeNotifier?.isDark ??
+                        (theme.brightness == Brightness.dark);
+                    return Row(children: [
+                      IconButton(
+                        onPressed: () {
+                          if (!_canUpdate) return;
+                          showModalBottomSheet(
+                            context: context,
+                            builder: (ctx) {
+                              return Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
                                   children: [
-                                    IconButton(
-                                        onPressed: () {},
-                                        icon: Icon(Icons.notifications_none,
-                                            color: theme.iconTheme.color)),
-                                    const SizedBox(width: 8),
-                                    IconButton(
-                                      tooltip: themeNotifier.isDark
-                                          ? 'Passer en clair'
-                                          : 'Passer en sombre',
-                                      onPressed: () => themeNotifier.toggle(),
-                                      icon: Icon(
-                                          themeNotifier.isDark
-                                              ? Icons.wb_sunny_outlined
-                                              : Icons.nights_stay_outlined,
-                                          color: theme.iconTheme.color),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _searchCtrl,
+                                        autofocus: true,
+                                        decoration: InputDecoration(
+                                          hintText: 'Rechercher...',
+                                          border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8)),
+                                          isDense: true,
+                                        ),
+                                        onSubmitted: (q) {
+                                          Navigator.of(ctx).pop();
+                                          if (!_canUpdate) return;
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(SnackBar(
+                                                  content:
+                                                      Text('Recherche: $q')));
+                                        },
+                                      ),
                                     ),
                                     const SizedBox(width: 8),
-                                    CircleAvatar(
-                                        child: Text(
-                                            (userEmail.isNotEmpty
-                                                ? userEmail[0].toUpperCase()
-                                                : 'U'),
-                                            style: theme.textTheme.bodyMedium)),
+                                    IconButton(
+                                        onPressed: () =>
+                                            Navigator.of(ctx).pop(),
+                                        icon: const Icon(Icons.close))
                                   ],
                                 ),
-                              ],
-                            ),
-                          ),
+                              );
+                            },
+                          );
+                        },
+                        icon: Icon(Icons.search,
+                            color: Theme.of(context).iconTheme.color),
+                      ),
+                      PopupMenuButton<int>(
+                        icon: Icon(Icons.more_vert,
+                            color: Theme.of(context).iconTheme.color),
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                              value: 1,
+                              child: ListTile(
+                                  leading: Icon(Icons.notifications_none),
+                                  title: Text('Notifications'))),
+                          PopupMenuItem(
+                              value: 2,
+                              child: ListTile(
+                                  leading: Icon(themeNotifier?.isDark ??
+                                          (theme.brightness == Brightness.dark)
+                                      ? Icons.wb_sunny_outlined
+                                      : Icons.nights_stay_outlined),
+                                  title: Text(themeNotifier?.isDark ??
+                                          (theme.brightness == Brightness.dark)
+                                      ? 'Passer en clair'
+                                      : 'Passer en sombre'))),
+                        ],
+                        onSelected: (v) {
+                          if (v == 2 && themeNotifier != null) {
+                            if (!_canUpdate) return;
+                            themeNotifier.toggle();
+                          }
+                        },
+                      ),
+                    ]);
+                  } else {
+                    return Row(
+                      children: [
+                        IconButton(
+                            onPressed: () {},
+                            icon: Icon(Icons.search,
+                                color: Theme.of(context).iconTheme.color)),
+                        IconButton(
+                            onPressed: () {},
+                            icon: Icon(Icons.notifications_none,
+                                color: Theme.of(context).iconTheme.color)),
+                        IconButton(
+                          tooltip: themeNotifier?.isDark ??
+                                  (theme.brightness == Brightness.dark)
+                              ? 'Passer en clair'
+                              : 'Passer en sombre',
+                          onPressed: () {
+                            if (!_canUpdate) return;
+                            if (themeNotifier != null) themeNotifier.toggle();
+                          },
+                          icon: Icon(
+                              themeNotifier?.isDark ??
+                                      (theme.brightness == Brightness.dark)
+                                  ? Icons.wb_sunny_outlined
+                                  : Icons.nights_stay_outlined,
+                              color: Theme.of(context).iconTheme.color),
                         ),
-                        Expanded(child: _buildContent(summary)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: CircleAvatar(
+                              backgroundColor: theme.colorScheme.primary,
+                              child: Text(
+                                  (userEmail.isNotEmpty
+                                      ? userEmail[0].toUpperCase()
+                                      : 'U'),
+                                  style: theme.textTheme.bodyMedium
+                                      ?.copyWith(color: Colors.white))),
+                        ),
                       ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          } else {
-            return Scaffold(
-              bottomNavigationBar: footer,
-              appBar: AppBar(
-                title: Text('Tableau de bord RH',
-                    style: theme.textTheme.titleLarge),
-                actions: [
-                  IconButton(
-                      onPressed: () {},
-                      icon: Icon(Icons.notifications_none,
-                          color: theme.iconTheme.color)),
-                  IconButton(
-                    onPressed: () => themeNotifier.toggle(),
-                    icon: Icon(
-                        themeNotifier.isDark
-                            ? Icons.wb_sunny_outlined
-                            : Icons.nights_stay_outlined,
-                        color: theme.iconTheme.color),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: CircleAvatar(
-                        child: Text(
-                            (userEmail.isNotEmpty
-                                ? userEmail[0].toUpperCase()
-                                : 'U'),
-                            style: theme.textTheme.bodyMedium)),
-                  ),
-                ],
-              ),
-              drawer: null,
-              body: _buildContent(summary),
-            );
-          }
-        });
+                    );
+                  }
+                }),
+              ],
+            ),
+            drawer: Drawer(
+                child:
+                    SafeArea(child: _sideNavExpanded(true, userEmail, theme))),
+            body: Column(
+              children: [
+                Expanded(child: _buildContentBody(summary, contentWidth)),
+              ],
+            ),
+          );
+        }
       },
     );
   }
 }
 
-/// Nav item with hover feedback (highlight + subtle translate)
+/// Nav item with hover feedback (highlight + subtle translate) and tooltip when collapsed
 class _HoverNavItem extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -565,283 +1052,121 @@ class _HoverNavItem extends StatefulWidget {
   State<_HoverNavItem> createState() => _HoverNavItemState();
 }
 
-class _HoverNavItemState extends State<_HoverNavItem> {
+class _HoverNavItemState extends State<_HoverNavItem>
+    with SingleTickerProviderStateMixin {
   bool _hovering = false;
+  late final AnimationController _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 180),
+        lowerBound: 0.0,
+        upperBound: 6.0);
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
 
   void _setHover(bool v) {
-    if (mounted) setState(() => _hovering = v);
+    if (!mounted) return;
+    setState(() => _hovering = v);
+    if (v) {
+      _anim.forward();
+    } else {
+      _anim.reverse();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isActive = widget.activeRoute == widget.route;
-    Theme.of(context);
-    const baseColor = Colors.white;
-    final bgColor = isActive
-        ? Colors.white.withOpacity(0.10)
-        : (_hovering ? Colors.white.withOpacity(0.06) : Colors.transparent);
+    return LayoutBuilder(builder: (context, constraints) {
+      final isActive = widget.activeRoute == widget.route;
+      final theme = Theme.of(context);
+      const baseColor = Colors.white;
+      final bgColor = isActive
+          ? Colors.white.withOpacity(0.15)
+          : (_hovering ? Colors.white.withOpacity(0.08) : Colors.transparent);
 
-    return MouseRegion(
-      onEnter: (_) => _setHover(true),
-      onExit: (_) => _setHover(false),
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+      final showLabel = widget.expanded && constraints.maxWidth >= 120;
+      final horizontalPadding = showLabel ? 14.0 : 6.0;
+      final verticalPadding = showLabel ? 8.0 : 6.0;
+
+      final inner = AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         padding: EdgeInsets.symmetric(
-            horizontal: widget.expanded ? 12 : 8, vertical: 8),
+            horizontal: horizontalPadding, vertical: verticalPadding),
         decoration: BoxDecoration(
-            color: bgColor, borderRadius: BorderRadius.circular(8)),
-        child: InkWell(
+            color: bgColor, borderRadius: BorderRadius.circular(12)),
+        child: GestureDetector(
           onTap: () => widget.onTap(widget.route),
-          borderRadius: BorderRadius.circular(8),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                height: 36,
-                width: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: isActive
-                      ? Colors.white24
-                      : (_hovering ? Colors.white12 : Colors.transparent),
-                  shape: BoxShape.circle,
+              AnimatedBuilder(
+                animation: _anim,
+                builder: (context, child) {
+                  return Transform.translate(
+                      offset: Offset(_anim.value, 0), child: child);
+                },
+                child: Container(
+                  height: 40,
+                  width: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? Colors.white30
+                        : (_hovering ? Colors.white12 : Colors.transparent),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(widget.icon, color: baseColor, size: 22),
                 ),
-                child: Icon(widget.icon, color: baseColor, size: 20),
               ),
-              if (widget.expanded) ...[
+              if (showLabel) ...[
                 const SizedBox(width: 12),
-                Expanded(
+                Flexible(
                   child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 150),
+                    duration: const Duration(milliseconds: 180),
                     style: TextStyle(
                         color: baseColor,
                         fontWeight:
-                            isActive ? FontWeight.w700 : FontWeight.w600),
-                    child: Text(widget.label),
+                            isActive ? FontWeight.w700 : FontWeight.w600,
+                        fontSize: 15),
+                    child: Text(widget.label, overflow: TextOverflow.ellipsis),
                   ),
                 ),
               ],
             ],
           ),
         ),
-      ),
-    );
-  }
-}
+      );
 
-/// Small self-contained StatCard that respects theme colors
-class _StatCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final Color color;
-  final IconData? icon;
-
-  const _StatCard(
-      {required this.title,
-      required this.value,
-      required this.color,
-      this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final titleStyle = theme.textTheme.bodySmall
-        ?.copyWith(color: theme.colorScheme.onSurface.withOpacity(0.85));
-    final valueStyle = theme.textTheme.titleLarge
-        ?.copyWith(color: color, fontWeight: FontWeight.w800, fontSize: 18);
-    return Card(
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            if (icon != null)
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, color: color, size: 20),
-              ),
-            if (icon != null) const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: titleStyle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 6),
-                  Text(value, style: valueStyle),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right,
-                color: theme.iconTheme.color?.withOpacity(0.6)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Section card that shows distribution with counts and percents
-class _SectionCard extends StatelessWidget {
-  final String title;
-  final Map<String, int> data;
-  final Map<String, String>? labels;
-  final List<Color> gradientColors;
-
-  const _SectionCard(
-      {required this.title,
-      required this.data,
-      required this.gradientColors,
-      this.labels});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final total = data.values.fold<int>(0, (a, b) => a + b);
-    final entries = data.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return Card(
-      elevation: 1,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(
-                child: Text(title,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700))),
-          ]),
-          const SizedBox(height: 8),
-          Column(
-            children: entries.map((e) {
-              final label = labels != null && labels!.containsKey(e.key)
-                  ? labels![e.key]!
-                  : e.key;
-              final count = e.value;
-              final pct = total > 0 ? count / total : 0.0;
-              final pctText = '${(pct * 100).round()}%';
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    SizedBox(
-                        width: 120,
-                        child: Text(label, style: theme.textTheme.bodyMedium)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: LayoutBuilder(builder: (ctx, constraints) {
-                        final full = constraints.maxWidth;
-                        final width = (pct * full).clamp(4.0, full);
-                        final gradient = LinearGradient(
-                            colors: gradientColors,
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight);
-                        return Stack(children: [
-                          Container(
-                              height: 14,
-                              decoration: BoxDecoration(
-                                  color: theme.colorScheme.surface
-                                      .withOpacity(0.06),
-                                  borderRadius: BorderRadius.circular(8))),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: (width / full).isFinite
-                                  ? (width / full)
-                                  : 0.0,
-                              child: Container(
-                                  height: 14,
-                                  width: full,
-                                  decoration:
-                                      BoxDecoration(gradient: gradient)),
-                            ),
-                          ),
-                        ]);
-                      }),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(count.toString(),
-                              style: theme.textTheme.bodyMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700)),
-                          Text(pctText,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurface
-                                      .withOpacity(0.65))),
-                        ]),
-                  ],
-                ),
-              );
-            }).toList(),
+      if (!widget.expanded) {
+        return MouseRegion(
+          onEnter: (_) => _setHover(true),
+          onExit: (_) => _setHover(false),
+          cursor: SystemMouseCursors.click,
+          child: Tooltip(
+            message: widget.label,
+            waitDuration: const Duration(milliseconds: 200),
+            showDuration: const Duration(seconds: 2),
+            child: inner,
           ),
-        ]),
-      ),
-    );
-  }
-}
+        );
+      }
 
-/// Section showing a simple list (recent personnel / birthdays)
-class _SectionCardList extends StatelessWidget {
-  final String title;
-  final List<dynamic> items;
-  final IconData? leadingIcon;
-
-  const _SectionCardList(
-      {required this.title, required this.items, this.leadingIcon});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      elevation: 1,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title,
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Column(
-            children: items.map((p) {
-              final name = p['name'] ?? 'Inconnu';
-              final subtitle = p['role'] ?? p['date'] ?? '';
-              final trailing = p['email'] ?? p['joined'] ?? '';
-              return ListTile(
-                dense: true,
-                leading: leadingIcon != null
-                    ? Icon(leadingIcon, color: theme.colorScheme.secondary)
-                    : CircleAvatar(
-                        child: Text(name[0].toUpperCase(),
-                            style: theme.textTheme.bodyMedium)),
-                title: Text(name, style: theme.textTheme.bodyMedium),
-                subtitle: subtitle != ''
-                    ? Text(subtitle, style: theme.textTheme.bodySmall)
-                    : null,
-                trailing: Text(trailing, style: theme.textTheme.bodySmall),
-              );
-            }).toList(),
-          ),
-        ]),
-      ),
-    );
+      return MouseRegion(
+        onEnter: (_) => _setHover(true),
+        onExit: (_) => _setHover(false),
+        cursor: SystemMouseCursors.click,
+        child: inner,
+      );
+    });
   }
 }

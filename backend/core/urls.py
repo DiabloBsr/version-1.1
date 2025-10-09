@@ -1,3 +1,4 @@
+# core/urls.py
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -7,7 +8,8 @@ from django.conf.urls.static import static
 urlpatterns = [
     path("admin/", admin.site.urls),
 
-    # API de gestion du personnel
+    # API de gestion du personnel (doit être inclus avant les routes auth si vous
+    # exposez des endpoints publics sous /api/v1/users/exists)
     path(
         "api/v1/",
         include(("manage_personnel.urls", "manage_personnel"), namespace="manage_personnel"),

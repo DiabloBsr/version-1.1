@@ -1,7 +1,10 @@
 // lib/screens/register_screen.dart
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../utils/secure_storage.dart';
+import '../services/user_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -16,10 +19,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final passCtrl = TextEditingController();
   final firstCtrl = TextEditingController();
   final lastCtrl = TextEditingController();
+
   bool loading = false;
   bool obscure = true;
   String? errorText;
   bool _isHovering = false;
+
+  @override
+  void dispose() {
+    emailCtrl.dispose();
+    usernameCtrl.dispose();
+    passCtrl.dispose();
+    firstCtrl.dispose();
+    lastCtrl.dispose();
+    super.dispose();
+  }
 
   bool _isValidEmail(String email) {
     final regex = RegExp(r'^[^@]+@[^@]+\.[^@]+');
@@ -33,31 +47,118 @@ class _RegisterScreenState extends State<RegisterScreen> {
         RegExp(r'[!@#\$&*~]').hasMatch(password);
   }
 
+  // Simple similarity check: longest common substring normalized by max length.
+  // Returns true if similarity ratio >= 0.45 (tunable).
+  double _longestCommonSubstringRatio(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return 0.0;
+    final la = a.length;
+    final lb = b.length;
+    // dynamic programming LCSUBSTR
+    final List<List<int>> dp =
+        List.generate(la + 1, (_) => List<int>.filled(lb + 1, 0));
+    int longest = 0;
+    for (int i = 1; i <= la; i++) {
+      for (int j = 1; j <= lb; j++) {
+        if (a[i - 1] == b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+          if (dp[i][j] > longest) longest = dp[i][j];
+        }
+      }
+    }
+    final maxLen = la > lb ? la : lb;
+    return maxLen == 0 ? 0.0 : longest / maxLen;
+  }
+
+  bool _isPasswordTooSimilar(String username, String password) {
+    final u = username.trim().toLowerCase();
+    final p = password.trim().toLowerCase();
+    if (u.isEmpty || p.isEmpty) return false;
+    // direct containment checks (very similar)
+    if (u.length >= 3 && p.contains(u)) return true;
+    if (p.length >= 3 && u.contains(p)) return true;
+    // LCS ratio check
+    final ratio = _longestCommonSubstringRatio(u, p);
+    return ratio >= 0.45; // threshold: adjust if needed
+  }
+
   Future<void> handleContinue() async {
-    setState(() => errorText = null);
+    if (loading) return;
+    if (!mounted) return;
+    setState(() {
+      errorText = null;
+      loading = true;
+    });
+
     final email = emailCtrl.text.trim();
     final username = usernameCtrl.text.trim();
     final password = passCtrl.text;
 
     if (email.isEmpty || username.isEmpty || password.isEmpty) {
-      setState(() => errorText = "Les champs marqués * sont obligatoires");
+      if (!mounted) return;
+      setState(() {
+        errorText = "Les champs marqués * sont obligatoires";
+        loading = false;
+      });
       return;
     }
 
     if (!_isValidEmail(email)) {
-      setState(() => errorText = "Email invalide");
+      if (!mounted) return;
+      setState(() {
+        errorText = "Email invalide";
+        loading = false;
+      });
       return;
     }
 
     if (!_isStrongPassword(password)) {
-      setState(() => errorText =
-          "Mot de passe trop faible (min 8, 1 majuscule, 1 chiffre, 1 symbole)");
+      if (!mounted) return;
+      setState(() {
+        errorText =
+            "Mot de passe trop faible (min 8, 1 majuscule, 1 chiffre, 1 symbole)";
+        loading = false;
+      });
       return;
     }
 
-    setState(() => loading = true);
+    // New: reject if password is very similar to username
+    if (_isPasswordTooSimilar(username, password)) {
+      if (!mounted) return;
+      setState(() {
+        errorText =
+            "Le mot de passe est trop similaire au nom d'utilisateur. Choisissez un mot de passe différent.";
+        loading = false;
+      });
+      return;
+    }
+
     try {
+      // Vérification d'unicité côté register (avant redirection)
+      final usernameTaken = await UserService.usernameExists(username);
+      if (!mounted) return;
+      if (usernameTaken) {
+        setState(() {
+          errorText =
+              "Ce nom d'utilisateur est déjà utilisé. Veuillez en choisir un autre.";
+          loading = false;
+        });
+        return;
+      }
+
+      final emailTaken = await UserService.emailExists(email);
+      if (!mounted) return;
+      if (emailTaken) {
+        setState(() {
+          errorText =
+              "Cet email est déjà associé à un compte. Connectez-vous ou utilisez un autre email.";
+          loading = false;
+        });
+        return;
+      }
+
+      // Tous les checks OK -> stocker le mot de passe et rediriger vers profile-extra
       await SecureStorage.write('pending_password', password);
+      if (!mounted) return;
 
       final extra = <String, String>{
         'email': email,
@@ -67,14 +168,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
         if (lastCtrl.text.trim().isNotEmpty) 'last_name': lastCtrl.text.trim(),
       };
 
+      if (!mounted) return;
       debugPrint(
           'RegisterScreen navigate -> /profile-extra with extra: $extra');
-      context.go('/profile-extra', extra: extra);
+      try {
+        context.go('/profile-extra', extra: extra);
+      } catch (e, st) {
+        debugPrint('Navigation to /profile-extra failed: $e\n$st');
+        if (!mounted) return;
+        setState(() {
+          errorText = 'Navigation failed. Réessayez.';
+        });
+      }
+    } on EndpointNotFoundException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        errorText =
+            'Impossible de vérifier l’unicité : le serveur ne propose pas d’endpoint public de vérification. Contactez l’administrateur.';
+        loading = false;
+      });
+    } on EndpointAuthRequiredException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        errorText =
+            'Le serveur protège l’endpoint de vérification (401). Contactez l’administrateur ou activez une vérification côté serveur.';
+        loading = false;
+      });
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        errorText =
+            "Le serveur a mis trop de temps à répondre lors des vérifications. Réessayez.";
+        loading = false;
+      });
     } catch (e, st) {
       debugPrint('handleContinue error: $e\n$st');
-      setState(() => errorText = 'Erreur interne, réessaye');
+      if (!mounted) return;
+      setState(
+          () => errorText = 'Erreur réseau ou serveur. Réessayez plus tard.');
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (!mounted) return;
+      setState(() => loading = false);
     }
   }
 
@@ -116,16 +250,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
             style: TextStyle(fontSize: 13, color: Colors.black54)),
       ],
     );
-  }
-
-  @override
-  void dispose() {
-    emailCtrl.dispose();
-    usernameCtrl.dispose();
-    passCtrl.dispose();
-    firstCtrl.dispose();
-    lastCtrl.dispose();
-    super.dispose();
   }
 
   Widget _styledActionButton() {
@@ -185,14 +309,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(
-                            Icons.arrow_forward,
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.arrow_forward,
                             key: ValueKey('icon'),
                             size: 18,
-                            color: Colors.white,
-                          ),
+                            color: Colors.white),
                   ),
                   const SizedBox(width: 12),
                   AnimatedDefaultTextStyle(
@@ -255,11 +376,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       style: TextStyle(
                                           color: Colors.red.shade700))),
                               IconButton(
-                                icon: Icon(Icons.close,
-                                    color: Colors.red.shade200),
-                                onPressed: () =>
-                                    setState(() => errorText = null),
-                              )
+                                  icon: Icon(Icons.close,
+                                      color: Colors.red.shade200),
+                                  onPressed: () =>
+                                      setState(() => errorText = null)),
                             ],
                           ),
                         ),
@@ -285,13 +405,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         decoration: _fieldDecoration(
                           label: 'Mot de passe *',
                           suffix: IconButton(
-                            icon: Icon(
-                                obscure
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: Colors.black54),
-                            onPressed: () => setState(() => obscure = !obscure),
-                          ),
+                              icon: Icon(
+                                  obscure
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.black54),
+                              onPressed: () =>
+                                  setState(() => obscure = !obscure)),
                         ),
                         textInputAction: TextInputAction.next,
                         onSubmitted: (_) => FocusScope.of(context).nextFocus(),

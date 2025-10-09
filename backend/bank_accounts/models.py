@@ -58,7 +58,7 @@ class BankAccount(models.Model):
     bank_name = models.CharField(max_length=120, blank=True)
     bank_code = models.CharField(max_length=64, blank=True, null=True)
     agency = models.CharField(max_length=64, blank=True, null=True)
-    currency = models.CharField(max_length=8, blank=True, default="EUR")
+    currency = models.CharField(max_length=8, blank=True, default="MGA")
 
     # Encrypted sensitive values (EncryptedTextField must return plaintext when accessed)
     iban_encrypted = EncryptedTextField(blank=True, null=True)
