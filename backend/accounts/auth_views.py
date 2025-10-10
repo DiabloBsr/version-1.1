@@ -28,8 +28,10 @@ class LogoutView(APIView):
     def post(self, request):
         refresh_token = request.data.get("refresh")
         if not refresh_token:
-            return Response({"success": False, "detail": "refresh token required"},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "detail": "refresh token required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             token = RefreshToken(refresh_token)
@@ -40,17 +42,25 @@ class LogoutView(APIView):
                     "rest_framework_simplejwt.token_blacklist is not available. "
                     "Add it to INSTALLED_APPS and run migrations."
                 )
-            return Response({"success": True, "detail": "logout successful"},
-                            status=status.HTTP_205_RESET_CONTENT)
+            return Response(
+                {"success": True, "detail": "logout successful"},
+                status=status.HTTP_205_RESET_CONTENT,
+            )
         except TokenError:
-            return Response({"success": False, "detail": "invalid token"},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "detail": "invalid token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except ImproperlyConfigured as e:
-            return Response({"success": False, "detail": str(e)},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"success": False, "detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         except Exception:
-            return Response({"success": False, "detail": "invalid token"},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "detail": "invalid token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class PasswordResetRequestView(APIView):
@@ -60,27 +70,38 @@ class PasswordResetRequestView(APIView):
     def post(self, request):
         email = request.data.get("email")
         if not email:
-            return Response({"success": False, "detail": "email required"},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "detail": "email required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         form = PasswordResetForm(data={"email": email})
         if form.is_valid():
-            form.save(
-                subject_template_name="registration/password_reset_subject.txt",
-                email_template_name="registration/password_reset_email.html",
-                use_https=request.is_secure(),
-                from_email=None,
-                request=request,
-            )
-        return Response({"success": True,
-                         "detail": "If that email exists, a reset link has been sent."},
-                        status=status.HTTP_200_OK)
+            try:
+                form.save(
+                    subject_template_name="registration/password_reset_subject.txt",
+                    email_template_name="registration/password_reset_email.html",
+                    use_https=request.is_secure(),
+                    from_email=None,
+                    request=request,
+                )
+            except Exception:
+                # Empêche le crash si password_reset_confirm n'est pas configuré
+                pass
+
+        return Response(
+            {
+                "success": True,
+                "detail": "If that email exists, a reset link has been sent.",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class TOTPSetupView(APIView):
     """
     Generate or return TOTP QR code (base64 only).
-    Response: { "success": true, "qr_base64": "data:image/png;base64,..." }
+    Response: { "success": true, "detail": "...", "qr_base64": "data:image/png;base64,..." }
     """
     permission_classes = [IsAuthenticated]
 
@@ -93,8 +114,10 @@ class TOTPSetupView(APIView):
                 user.totp_secret = secret
                 user.save(update_fields=["totp_secret"])
             except Exception:
-                return Response({"success": False, "detail": "unable to persist totp_secret"},
-                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response(
+                    {"success": False, "detail": "unable to persist totp_secret"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
 
         provisioning_uri = pyotp.TOTP(secret).provisioning_uri(
             name=user.email,
@@ -107,13 +130,19 @@ class TOTPSetupView(APIView):
             qr.save(buffer, format="PNG")
             qr_base64 = base64.b64encode(buffer.getvalue()).decode()
         except Exception as e:
-            return Response({"success": False, "detail": f"QR generation failed: {e}"},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"success": False, "detail": f"QR generation failed: {e}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
-        return Response({
-            "success": True,
-            "qr_base64": f"data:image/png;base64,{qr_base64}"
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "success": True,
+                "detail": "MFA setup complete",
+                "qr_base64": f"data:image/png;base64,{qr_base64}",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class TOTPVerifyView(APIView):
@@ -128,16 +157,22 @@ class TOTPVerifyView(APIView):
         user = request.user
         secret = getattr(user, "totp_secret", None)
         if not secret:
-            return Response({"success": False, "detail": "MFA not setup"},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "detail": "MFA not setup"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         totp = pyotp.TOTP(secret)
         if totp.verify(otp, valid_window=1):
             if hasattr(user, "is_mfa_verified"):
                 user.is_mfa_verified = True
                 user.save(update_fields=["is_mfa_verified"])
-            return Response({"success": True, "detail": "verified"},
-                            status=status.HTTP_200_OK)
+            return Response(
+                {"success": True, "detail": "verified"},
+                status=status.HTTP_200_OK,
+            )
 
-        return Response({"success": False, "detail": "invalid otp"},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"success": False, "detail": "invalid otp"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )

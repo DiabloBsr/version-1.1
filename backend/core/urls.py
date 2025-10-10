@@ -1,4 +1,3 @@
-# core/urls.py
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -8,8 +7,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path("admin/", admin.site.urls),
 
-    # API de gestion du personnel (doit être inclus avant les routes auth si vous
-    # exposez des endpoints publics sous /api/v1/users/exists)
+    # API de gestion du personnel
     path(
         "api/v1/",
         include(("manage_personnel.urls", "manage_personnel"), namespace="manage_personnel"),
@@ -26,12 +24,15 @@ urlpatterns = [
     path("api/v1/auth/", include("djoser.urls")),
     path("api/v1/auth/", include("djoser.urls.jwt")),
 
-    # JWT tokens (endpoints alternatifs)
+    # JWT tokens
     path("api/v1/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/v1/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # Tableau de bord RH
     path("api/v1/dashboard/", include(("dashboard.urls", "dashboard"), namespace="dashboard")),
+
+    # Ajout des URLs d'auth Django pour password_reset_confirm
+    path("auth/", include("django.contrib.auth.urls")),
 ]
 
 # Serve media files in development
