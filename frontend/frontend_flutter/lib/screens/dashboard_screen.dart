@@ -1,4 +1,3 @@
-// lib/screens/dashboard_screen.dart
 // ignore_for_file: unused_local_variable, unused_field, unnecessary_null_comparison
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -143,32 +142,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Heuristics to compute active users and "new this month" from summary data.
-  // Assumptions:
-  // - DashboardSummary may expose a users list (summary.users) where each user map contains:
-  //    'is_active' (bool) and 'date_joined' (ISO string) or 'created_at'
-  // - If summary already provides aggregated counts (summary.activePersonnel, summary.newThisMonth),
-  //   we prefer those fields.
+  // Uses only fields present on DashboardSummary DTO: activePersonnel, newThisMonth, totalUsers.
   int _computeActiveFromSummary(DashboardSummary s) {
     try {
-      // prefer provided aggregate
       final provided = s.activePersonnel;
       if (provided != null) return provided;
     } catch (_) {}
     try {
-      final users = s.users;
-      if (users is List) {
-        return users.where((u) {
-          try {
-            final isActive = (u['is_active'] ?? u['active'] ?? false) as bool;
-            return isActive;
-          } catch (_) {
-            return false;
-          }
-        }).length;
-      }
+      final total = s.totalUsers;
+      if (total != null) return total;
     } catch (_) {}
-    // fallback to summary.activePersonnel if non-null, else 0
-    return (s.activePersonnel);
+    return 0;
   }
 
   int _computeNewThisMonthFromSummary(DashboardSummary s) {
@@ -176,31 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final provided = s.newThisMonth;
       if (provided != null) return provided;
     } catch (_) {}
-    try {
-      final users = s.users;
-      if (users is List) {
-        final now = DateTime.now();
-        final year = now.year;
-        final month = now.month;
-        return users.where((u) {
-          try {
-            final raw = u['date_joined'] ??
-                u['created_at'] ??
-                u['created'] ??
-                u['date'];
-            if (raw == null) return false;
-            final dt = DateTime.parse(raw.toString());
-            return dt.year == year &&
-                dt.month == month &&
-                dt.isBefore(now.add(const Duration(seconds: 1)));
-          } catch (_) {
-            return false;
-          }
-        }).length;
-      }
-    } catch (_) {}
-    // fallback
-    return (s.newThisMonth);
+    return 0;
   }
 
   Widget _sideNavExpanded(bool expanded, String userEmail, ThemeData theme) {
@@ -326,8 +286,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _statCards(
       DashboardSummary summary, ThemeData theme, double contentWidth) {
     // compute dynamic values
-    final totalUsers = summary.totalUsers ??
-        (summary.users is List ? (summary.users as List).length : 0);
+    final totalUsers = summary.totalUsers;
     final activePersonnel = _computeActiveFromSummary(summary);
     final newThisMonth = _computeNewThisMonthFromSummary(summary);
 
