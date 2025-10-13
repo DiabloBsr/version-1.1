@@ -17,24 +17,31 @@ class StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final cardColor = theme.colorScheme.surface;
+    final mutedText = theme.colorScheme.onSurface.withOpacity(0.70);
+    final valueTextColor = theme.colorScheme.onSurface;
+
     return ConstrainedBox(
       constraints: const BoxConstraints(minWidth: 120, maxWidth: 340),
       child: Card(
+        color: cardColor,
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min, // shrink to content
+            mainAxisSize: MainAxisSize.min,
             children: [
               if (icon != null)
                 Container(
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
+                    color: color.withOpacity(isDark ? 0.18 : 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
@@ -51,21 +58,25 @@ class StatCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: textTheme.bodySmall?.copyWith(
-                          color: textTheme.bodySmall?.color?.withOpacity(0.85)),
+                        color: mutedText,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       value,
                       style: textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                          color: Colors.black87),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                        color: valueTextColor,
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.chevron_right, color: Colors.grey[400], size: 18),
+              Icon(Icons.chevron_right,
+                  color: theme.colorScheme.onSurface.withOpacity(0.48),
+                  size: 18),
             ],
           ),
         ),

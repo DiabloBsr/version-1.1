@@ -21,6 +21,7 @@ import 'screens/bank_account_create_screen.dart';
 import 'screens/bank_account_view_screen.dart';
 import 'screens/bank_account_edit_screen.dart' as bank_edit;
 import 'screens/history_screen.dart';
+import 'screens/users_list_screen.dart';
 import 'services/auth_service.dart';
 
 bool _isValidUuid(String id) {
@@ -30,6 +31,18 @@ bool _isValidUuid(String id) {
 }
 
 String _encodeNext(String next) => Uri.encodeComponent(next);
+
+bool _hasAnyRole(AuthState? authState, List<String> roles) {
+  final r = authState?.role?.toString();
+  if (r == null) return false;
+  final rl = r.toLowerCase();
+  for (final allowed in roles) {
+    final al = allowed.toLowerCase();
+    if (rl == al) return true;
+    if (rl.contains(al)) return true;
+  }
+  return false;
+}
 
 GoRouter createRouter(AuthState authState) {
   return GoRouter(
@@ -131,6 +144,25 @@ GoRouter createRouter(AuthState authState) {
           path: '/history',
           builder: (BuildContext context, GoRouterState state) =>
               const HistoryScreen()),
+
+      // Personnel route (protected by role check in redirect)
+      GoRoute(
+        path: '/personnel',
+        builder: (BuildContext context, GoRouterState state) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Personnel')),
+            body: const Center(child: Text('Chargement...')),
+          );
+        },
+      ),
+
+      // Admin/manager users list route
+      GoRoute(
+        path: '/users',
+        builder: (BuildContext context, GoRouterState state) {
+          return const UsersListScreen();
+        },
+      ),
     ],
     redirect: (BuildContext context, GoRouterState state) {
       final uriPath = state.uri.path;
@@ -157,6 +189,8 @@ GoRouter createRouter(AuthState authState) {
         RegExp(r'^/profile(/.*)?$'),
         RegExp(r'^/settings(/.*)?$'),
         RegExp(r'^/support(/.*)?$'),
+        RegExp(r'^/users(/.*)?$'),
+        RegExp(r'^/personnel(/.*)?$'),
       ];
 
       bool matchesAllowedAuthenticated(String path) {
@@ -207,6 +241,32 @@ GoRouter createRouter(AuthState authState) {
 
       // If logged in and otpVerified, allow explicitly permitted authenticated routes
       if (loggedInSync && authState.otpVerified) {
+        // Explicit guard for /users: allow only admin/manager/gestionnaire
+        if (uriPath == '/users' || uriPath.startsWith('/users/')) {
+          final allowed =
+              _hasAnyRole(authState, ['admin', 'manager', 'gestionnaire']);
+          if (!allowed) {
+            final role = authState.role?.toLowerCase();
+            if (role == 'admin') return '/dashboard';
+            if (role == 'user') return '/user-home';
+            return '/home';
+          }
+          return null;
+        }
+
+        // Guard: only allow personnel list to roles admin or manager
+        if (uriPath.startsWith('/personnel')) {
+          final allowed =
+              _hasAnyRole(authState, ['admin', 'manager', 'gestionnaire']);
+          if (!allowed) {
+            // Redirect non-authorized roles to their landing page
+            final role = authState.role?.toLowerCase();
+            if (role == 'admin') return '/dashboard';
+            if (role == 'user') return '/user-home';
+            return '/home';
+          }
+        }
+
         if (matchesAllowedAuthenticated(uriPath)) {
           // extra guard for view/edit id validity: if route is view/edit but id invalid, redirect to bank-accounts
           if (uriPath.startsWith('/bank-account/view/') ||

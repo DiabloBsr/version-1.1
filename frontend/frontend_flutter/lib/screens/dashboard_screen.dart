@@ -129,11 +129,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  bool _isAdminOrManager(AuthState? auth) {
+    if (auth == null) return false;
+    final role = auth.role?.toString().toLowerCase();
+    if (role == null) return false;
+    if (role == 'admin') return true;
+    if (role == 'manager' || role == 'gestionnaire') return true;
+    if (role.contains('admin')) return true;
+    if (role.contains('manager')) return true;
+    if (role.contains('gestionnaire')) return true;
+    return false;
+  }
+
   void _onNavigate(String route) {
     if (!_canUpdate) return;
     setState(() => _activeRoute = route);
+    final auth = _safeAuthState();
+
+    // If navigating to personnel list and user is admin or manager, redirect to admin users page.
+    if (route == '/personnel' || route == '/personnel/') {
+      if (_isAdminOrManager(auth)) {
+        try {
+          context.go('/users');
+        } catch (e, st) {
+          debugPrint('Navigation to /users failed: $e\n$st');
+        }
+        if (!kIsWeb && mounted) Navigator.pop(context);
+        return;
+      }
+    }
+
     if (!kIsWeb && mounted) Navigator.pop(context);
-    if (!_canUpdate) return;
     try {
       context.go(route);
     } catch (e, st) {
@@ -150,7 +176,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (_) {}
     try {
       final total = s.totalUsers;
-      if (total != null) return total;
+      // ignore: unnecessary_type_check
+      if (total != null && total is int) return total;
     } catch (_) {}
     return 0;
   }
@@ -165,9 +192,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _sideNavExpanded(bool expanded, String userEmail, ThemeData theme) {
     final effectiveWidth = expanded ? 240.0 : 72.0;
+    final isDark = theme.brightness == Brightness.dark;
+    final bgColor =
+        isDark ? Colors.blueGrey.shade900 : theme.colorScheme.primary;
+    final titleColor =
+        isDark ? theme.colorScheme.onPrimary : theme.colorScheme.onPrimary;
+    final subtitleColor = isDark
+        ? theme.colorScheme.onPrimary.withOpacity(0.9)
+        : theme.colorScheme.onPrimary.withOpacity(0.9);
+
     return Container(
       width: effectiveWidth,
-      color: Colors.blue.shade900,
+      color: bgColor,
       child: SafeArea(
         child: Column(
           children: [
@@ -179,9 +215,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                        color: Colors.white30, shape: BoxShape.circle),
-                    child: const Icon(Icons.business,
-                        color: Colors.white, size: 28),
+                        color: isDark ? Colors.white10 : Colors.white30,
+                        shape: BoxShape.circle),
+                    child: Icon(Icons.business, color: titleColor, size: 28),
                   ),
                   if (expanded)
                     Expanded(
@@ -190,15 +226,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('BotaApp',
+                            Text('HUJRA-APP',
                                 style: TextStyle(
-                                    color: Colors.white,
+                                    color: titleColor,
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold)),
                             const SizedBox(height: 4),
                             Text(userEmail,
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 13),
+                                style: TextStyle(
+                                    color: subtitleColor, fontSize: 13),
                                 overflow: TextOverflow.ellipsis),
                           ],
                         ),
@@ -207,7 +243,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ),
-            const Divider(color: Colors.white24, height: 1),
+            Divider(color: isDark ? Colors.white12 : Colors.white24, height: 1),
             const SizedBox(height: 12),
             _HoverNavItem(
                 icon: Icons.dashboard,
@@ -289,17 +325,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final totalUsers = summary.totalUsers;
     final activePersonnel = _computeActiveFromSummary(summary);
     final newThisMonth = _computeNewThisMonthFromSummary(summary);
+    final auth = _safeAuthState();
 
-    // build cards. make "Total utilisateurs" clickable -> navigate to '/users' (admin list)
+    // build cards. make "Total utilisateurs" clickable -> navigate to '/users' (admin/manager list)
     final cards = [
       GestureDetector(
         onTap: () {
           if (!_canUpdate) return;
-          try {
-            context.go('/users'); // route showing full list of users
-          } catch (e) {
-            debugPrint('Navigation to /users failed: $e');
+          if (_isAdminOrManager(auth)) {
+            try {
+              context.go('/users');
+            } catch (e) {
+              debugPrint('Navigation to /users failed: $e');
+            }
+            return;
           }
+          // non-admin/manager: navigate to personnel page
+          _onNavigate('/personnel');
         },
         child: StatCard(
           title: "Total utilisateurs",
@@ -349,8 +391,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               size: 48, color: theme.colorScheme.primary.withOpacity(0.12)),
           const SizedBox(height: 12),
           Text(text,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: Colors.grey[600])),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurface.withOpacity(0.7))),
         ],
       ),
     );
@@ -393,7 +435,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       decoration: InputDecoration(
                         contentPadding: const EdgeInsets.symmetric(
                             vertical: 10, horizontal: 12),
-                        prefixIcon: const Icon(Icons.search, size: 20),
+                        prefixIcon: Icon(Icons.search,
+                            size: 20, color: theme.iconTheme.color),
                         hintText: 'Rechercher...',
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
@@ -419,7 +462,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   tooltip: isDark ? 'Passer en clair' : 'Passer en sombre',
                   onPressed: () {
                     if (!_canUpdate) return;
-                    if (tn != null) tn.toggle();
+                    final tnLocal = ThemeNotifier.safeOf(context);
+                    if (tnLocal != null) {
+                      tnLocal.toggle();
+                      if (mounted) setState(() {});
+                    } else {
+                      if (mounted) setState(() {});
+                    }
                   },
                   icon: Icon(
                       isDark
@@ -483,7 +532,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(value.toString(), style: theme.textTheme.bodySmall),
+                      Text(value.toString(),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.onSurface)),
                       const SizedBox(height: 6),
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 300),
@@ -505,7 +556,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         width: barWidth + 4,
                         child: Text(label,
                             textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall,
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: theme.colorScheme.onSurface),
                             overflow: TextOverflow.ellipsis),
                       ),
                     ],
@@ -556,7 +608,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     data: summary.ageDistribution
                         .map((k, v) => MapEntry(k, v as int)),
                     labels: ageLabels,
-                    barColors: [Colors.blue.shade600, Colors.blue.shade600],
+                    barColors: [
+                      theme.colorScheme.primary,
+                      theme.colorScheme.primaryContainer
+                    ],
                     height: 220,
                   ),
                 ),
@@ -572,7 +627,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     data: summary.maritalStatus
                         .map((k, v) => MapEntry(k, v as int)),
                     labels: maritalLabels,
-                    barColors: [Colors.teal.shade600, Colors.teal.shade500],
+                    barColors: [
+                      theme.colorScheme.secondary,
+                      theme.colorScheme.secondaryContainer
+                    ],
                     height: 180,
                   ),
                 ),
@@ -616,13 +674,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 title: Text(name,
                                     style: theme.textTheme.bodyLarge?.copyWith(
-                                        fontWeight: FontWeight.w700)),
+                                        fontWeight: FontWeight.w700,
+                                        color: theme.colorScheme.onSurface)),
                                 subtitle: subtitle.isNotEmpty
                                     ? Text(subtitle,
-                                        style: theme.textTheme.bodySmall)
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                                color: theme
+                                                    .colorScheme.onSurface
+                                                    .withOpacity(0.8)))
                                     : null,
-                                trailing: const Icon(Icons.chevron_right,
-                                    color: Colors.grey),
+                                trailing: Icon(Icons.chevron_right,
+                                    color: theme.colorScheme.onSurface
+                                        .withOpacity(0.5)),
                                 onTap: () {/* open profile */},
                               ),
                               if (i < summary.recentPersonnel.length - 1)
@@ -655,16 +719,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 dense: false,
                                 contentPadding: const EdgeInsets.symmetric(
                                     vertical: 6, horizontal: 8),
-                                leading: const Icon(Icons.cake, size: 28),
+                                leading: Icon(Icons.cake,
+                                    size: 28,
+                                    color: theme.colorScheme.onSurface),
                                 title: Text(name,
                                     style: theme.textTheme.bodyLarge?.copyWith(
-                                        fontWeight: FontWeight.w700)),
+                                        fontWeight: FontWeight.w700,
+                                        color: theme.colorScheme.onSurface)),
                                 subtitle: date.isNotEmpty
                                     ? Text(date,
-                                        style: theme.textTheme.bodySmall)
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                                color: theme
+                                                    .colorScheme.onSurface
+                                                    .withOpacity(0.8)))
                                     : null,
-                                trailing: const Icon(Icons.chevron_right,
-                                    color: Colors.grey),
+                                trailing: Icon(Icons.chevron_right,
+                                    color: theme.colorScheme.onSurface
+                                        .withOpacity(0.5)),
                                 onTap: () {/* open profile */},
                               ),
                               if (i < summary.upcomingBirthdays.length - 1)
@@ -767,7 +839,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             return Row(
               children: [
                 Expanded(
-                  child: Text('© ${DateTime.now().year} BotaApp — Gestion RH',
+                  child: Text('© ${DateTime.now().year} HUJRA — Gestion RH',
                       style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant)),
                 ),
@@ -926,6 +998,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           if (v == 2 && themeNotifier != null) {
                             if (!_canUpdate) return;
                             themeNotifier.toggle();
+                            if (mounted) setState(() {});
                           }
                         },
                       ),
@@ -948,7 +1021,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               : 'Passer en sombre',
                           onPressed: () {
                             if (!_canUpdate) return;
-                            if (themeNotifier != null) themeNotifier.toggle();
+                            if (themeNotifier != null) {
+                              themeNotifier.toggle();
+                              if (mounted) setState(() {});
+                            }
                           },
                           icon: Icon(
                               themeNotifier?.isDark ??
@@ -1047,10 +1123,13 @@ class _HoverNavItemState extends State<_HoverNavItem>
     return LayoutBuilder(builder: (context, constraints) {
       final isActive = widget.activeRoute == widget.route;
       final theme = Theme.of(context);
-      const baseColor = Colors.white;
+      final isDark = theme.brightness == Brightness.dark;
+      final baseColor = isDark ? Colors.white : Colors.white;
       final bgColor = isActive
-          ? Colors.white.withOpacity(0.15)
-          : (_hovering ? Colors.white.withOpacity(0.08) : Colors.transparent);
+          ? Colors.white.withOpacity(isDark ? 0.08 : 0.15)
+          : (_hovering
+              ? Colors.white.withOpacity(isDark ? 0.06 : 0.08)
+              : Colors.transparent);
 
       final showLabel = widget.expanded && constraints.maxWidth >= 120;
       final horizontalPadding = showLabel ? 14.0 : 6.0;
@@ -1108,24 +1187,21 @@ class _HoverNavItemState extends State<_HoverNavItem>
 
       if (!widget.expanded) {
         return MouseRegion(
-          onEnter: (_) => _setHover(true),
-          onExit: (_) => _setHover(false),
-          cursor: SystemMouseCursors.click,
-          child: Tooltip(
-            message: widget.label,
-            waitDuration: const Duration(milliseconds: 200),
-            showDuration: const Duration(seconds: 2),
-            child: inner,
-          ),
-        );
+            onEnter: (_) => _setHover(true),
+            onExit: (_) => _setHover(false),
+            cursor: SystemMouseCursors.click,
+            child: Tooltip(
+                message: widget.label,
+                waitDuration: const Duration(milliseconds: 200),
+                showDuration: const Duration(seconds: 2),
+                child: inner));
       }
 
       return MouseRegion(
-        onEnter: (_) => _setHover(true),
-        onExit: (_) => _setHover(false),
-        cursor: SystemMouseCursors.click,
-        child: inner,
-      );
+          onEnter: (_) => _setHover(true),
+          onExit: (_) => _setHover(false),
+          cursor: SystemMouseCursors.click,
+          child: inner);
     });
   }
 }

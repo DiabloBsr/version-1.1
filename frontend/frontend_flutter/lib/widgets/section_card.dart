@@ -50,15 +50,21 @@ class SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cardColor = theme.colorScheme.surface;
+    final shadow = theme.brightness == Brightness.dark
+        ? Colors.black.withOpacity(0.6)
+        : Colors.black.withOpacity(0.06);
+
     return Card(
+      color: cardColor,
       elevation: 6,
-      shadowColor: Colors.black.withOpacity(0.06),
+      shadowColor: shadow,
       margin: const EdgeInsets.symmetric(vertical: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min, // adapt height to content
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -76,7 +82,8 @@ class SectionCard extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeInOut,
               child: DefaultTextStyle.merge(
-                style: theme.textTheme.bodyMedium ?? const TextStyle(),
+                style: theme.textTheme.bodyMedium ??
+                    TextStyle(color: theme.colorScheme.onSurface),
                 child: child,
               ),
             ),
@@ -108,23 +115,30 @@ class _GradientDistributionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final pctText = '${(percent * 100).round()}%';
     final theme = Theme.of(context);
+    final labelColor = theme.colorScheme.onSurface.withOpacity(0.88);
+    final valueColor = theme.colorScheme.onSurface;
+    final percentColor = theme.colorScheme.onSurface.withOpacity(0.65);
+    final backgroundBar = theme.colorScheme.surfaceVariant;
 
     return Row(
       children: [
         SizedBox(
             width: 140,
-            child: Text(label, style: const TextStyle(fontSize: 13))),
+            child: Text(label,
+                style: theme.textTheme.bodySmall?.copyWith(color: labelColor))),
         const SizedBox(width: 8),
         Expanded(
           child: LayoutBuilder(builder: (ctx, constraints) {
             final fullWidth = constraints.maxWidth;
             final barWidth = (percent * fullWidth).clamp(4.0, fullWidth);
+            final widthFactor =
+                (fullWidth > 0) ? (barWidth / fullWidth).clamp(0.0, 1.0) : 0.0;
             return Stack(
               children: [
                 Container(
                   height: 16,
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceVariant,
+                    color: backgroundBar,
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
@@ -132,9 +146,7 @@ class _GradientDistributionRow extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    widthFactor: (barWidth / fullWidth).isFinite
-                        ? (barWidth / fullWidth)
-                        : 0.0,
+                    widthFactor: widthFactor,
                     child: Container(
                       height: 16,
                       width: fullWidth,
@@ -157,12 +169,12 @@ class _GradientDistributionRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(value.toString(),
-                style: const TextStyle(fontWeight: FontWeight.w700)),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(fontWeight: FontWeight.w700, color: valueColor)),
             if (showPercent)
               Text(pctText,
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurface.withOpacity(0.65))),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontSize: 12, color: percentColor)),
           ],
         ),
       ],

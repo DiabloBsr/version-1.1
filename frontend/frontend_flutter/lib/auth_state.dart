@@ -13,21 +13,23 @@ class AuthState extends ChangeNotifier {
   bool? mfaEnabled;
   String? userEmail;
 
-  // Nouveautés pour connexion en deux étapes
-  bool pendingLogin = false; // true après soumission identifiants si OTP requis
-  String? pendingEmail; // email/username pour flow OTP
-  String? pendingTempToken; // token temporaire / transaction id du backend
+  // Profile fields (nouveaux)
+  String? firstName;
+  String? lastName;
+  String? fullName;
 
-  // Internal initialization indicator used by router to avoid redirect loops
+  // Nouveautés pour connexion en deux étapes
+  bool pendingLogin = false;
+  String? pendingEmail;
+  String? pendingTempToken;
+
   bool _initialized = false;
   bool get initialized => _initialized;
 
-  /// Expose email via `email` getter (router expects authState.email)
   String? get email => userEmail;
 
   AuthState();
 
-  /// Charge l'état initial depuis SecureStorage. Appelle notifyListeners().
   Future<void> initFromStorage() async {
     try {
       final access = await SecureStorage.read('access');
@@ -42,14 +44,17 @@ class AuthState extends ChangeNotifier {
 
       userEmail = await SecureStorage.read('email');
 
-      // pending info are not persisted long-term; kept in-memory
+      // Attempt to load profile if logged in and no profile cached
+      if (loggedIn && (firstName == null && fullName == null)) {
+        await loadProfileFromApi();
+      }
+
       pendingLogin = false;
       pendingEmail = null;
       pendingTempToken = null;
 
       debugPrint(
-        '[AuthState] initFromStorage loggedIn=$loggedIn otpVerified=$otpVerified role=$role mfaEnabled=$mfaEnabled userEmail=$userEmail',
-      );
+          '[AuthState] initFromStorage loggedIn=$loggedIn userEmail=$userEmail role=$role');
     } catch (e, st) {
       debugPrint('[AuthState] initFromStorage error: $e\n$st');
     } finally {
@@ -73,6 +78,9 @@ class AuthState extends ChangeNotifier {
     role = null;
     mfaEnabled = null;
     userEmail = null;
+    firstName = null;
+    lastName = null;
+    fullName = null;
     pendingLogin = false;
     pendingEmail = null;
     pendingTempToken = null;
@@ -120,11 +128,12 @@ class AuthState extends ChangeNotifier {
       await SecureStorage.write('email', email);
       debugPrint('[AuthState] setUserEmail -> $email');
       await _createProfileIfNeeded(email);
+      // after setting email, attempt to fetch profile
+      await loadProfileFromApi();
     }
     notifyListeners();
   }
 
-  /// Setter helper pour pendingLogin qui appelle notifyListeners()
   void setPendingLogin(bool v) {
     if (pendingLogin != v) {
       pendingLogin = v;
@@ -133,14 +142,70 @@ class AuthState extends ChangeNotifier {
     }
   }
 
-  // ---- Flow two-step helpers ----
+  // ---- Profile fetching helper ----
+  /// Charge le profil utilisateur depuis l'API backend si possible.
+  /// Attend un endpoint retournant { first_name, last_name, full_name } ou champs similaires.
+  Future<void> loadProfileFromApi() async {
+    try {
+      final accessToken = await SecureStorage.read('access');
+      if (accessToken == null || accessToken.isEmpty) return;
 
-  /// Appelé après la première étape du login (username+password)
-  /// Le backend peut renvoyer tokens ou indiquer otp_required avec temp_token
+      // ADAPTEZ CETTE URL à votre backend réel
+      final url = Uri.parse('https://your-backend.com/api/profile/me/');
+      final headers = {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+
+      final res = await http
+          .get(url, headers: headers)
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+
+        // Normalisation : essaye plusieurs clés possibles
+        firstName = (data['first_name'] ??
+                data['given_name'] ??
+                data['prenom'] ??
+                data['firstName'])
+            ?.toString();
+        lastName = (data['last_name'] ??
+                data['family_name'] ??
+                data['nom'] ??
+                data['lastName'])
+            ?.toString();
+        fullName = (data['full_name'] ??
+                data['name'] ??
+                data['display_name'] ??
+                data['fullName'])
+            ?.toString();
+
+        // Si fullName absent mais first+last présents, compose
+        if ((fullName == null || fullName!.isEmpty) &&
+            (firstName?.isNotEmpty == true || lastName?.isNotEmpty == true)) {
+          fullName =
+              '${firstName ?? ''}${firstName != null && lastName != null ? ' ' : ''}${lastName ?? ''}'
+                  .trim();
+        }
+
+        debugPrint(
+            '[AuthState] loadProfileFromApi -> firstName=$firstName lastName=$lastName fullName=$fullName');
+        notifyListeners();
+      } else {
+        debugPrint('[AuthState] loadProfileFromApi non-200: ${res.statusCode}');
+      }
+    } catch (e, st) {
+      debugPrint('[AuthState] loadProfileFromApi error: $e\n$st');
+    }
+  }
+
+  // ---- Flow two-step helpers (inchangés sauf ajout du loadProfileFromApi post-login) ----
+
   Future<void> startPendingLogin({
     required String email,
     required String password,
-    required Uri loginUri, // exemple: Uri.parse('http://.../auth/login/')
+    required Uri loginUri,
   }) async {
     pendingLogin = false;
     pendingEmail = null;
@@ -156,18 +221,18 @@ class AuthState extends ChangeNotifier {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        // Si backend renvoie tokens directement
         if (data['access'] != null && data['refresh'] != null) {
           await setTokens(data['access'], data['refresh']);
           await setUserEmail(email);
           if (data['mfa_enabled'] != null)
             await setMfaEnabled(data['mfa_enabled']);
           if (data['role'] != null) await setRole(data['role']);
-          await setOtpVerified(true); // pas d'OTP requis
+          await setOtpVerified(true);
+          // fetch profile now
+          await loadProfileFromApi();
           return;
         }
 
-        // Si backend demande OTP
         if (data['otp_required'] == true) {
           pendingLogin = true;
           pendingEmail = email;
@@ -185,11 +250,9 @@ class AuthState extends ChangeNotifier {
     }
   }
 
-  /// Appelé après que l'utilisateur ait saisi le code OTP
-  /// Le backend doit renvoyer les tokens définitifs
   Future<bool> confirmOtp({
     required String otpCode,
-    required Uri verifyUri, // exemple: Uri.parse('http://.../auth/verify-otp/')
+    required Uri verifyUri,
   }) async {
     if (!pendingLogin || pendingEmail == null) return false;
 
@@ -214,11 +277,12 @@ class AuthState extends ChangeNotifier {
             await setMfaEnabled(data['mfa_enabled']);
           if (data['role'] != null) await setRole(data['role']);
           await setOtpVerified(true);
-          // clear pending
           pendingLogin = false;
           pendingEmail = null;
           pendingTempToken = null;
           notifyListeners();
+          // fetch profile now
+          await loadProfileFromApi();
           return true;
         }
       }
@@ -237,8 +301,6 @@ class AuthState extends ChangeNotifier {
     pendingTempToken = null;
     notifyListeners();
   }
-
-  // ---- fin helpers ----
 
   Future<void> _createProfileIfNeeded(String email) async {
     final accessToken = await SecureStorage.read('access');

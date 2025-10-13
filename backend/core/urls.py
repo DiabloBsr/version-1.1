@@ -30,7 +30,7 @@ urlpatterns = [
 
     # Tableau de bord RH
     path("api/v1/dashboard/", include(("dashboard.urls", "dashboard"), namespace="dashboard")),
-    
+
     # Ajout des URLs d'auth Django pour password_reset_confirm
     path("auth/", include("django.contrib.auth.urls")),
 ]

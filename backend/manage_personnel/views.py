@@ -142,3 +142,48 @@ class UserExistsView(APIView):
 
         exists = qs.exists()
         return Response({"exists": exists}, status=status.HTTP_200_OK)
+    
+class AllUsersView(APIView):
+    """
+    GET /api/v1/manage_personnel/users/ (ou selon ton routing)
+    Retourne la liste des utilisateurs (restreint aux staff / superuser).
+
+    Response: 200 [
+      {"id": 1, "username": "...", "email": "...", "is_active": true,
+       "date_joined": "2025-10-12T...", "role": "Manager" or null}
+    ]
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Only staff or superuser can list all users
+        if not (user.is_staff or user.is_superuser):
+            return Response({"detail": "Insufficient permissions."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = User.objects.all().select_related("profile").order_by("-date_joined")
+        out = []
+        for u in qs:
+            # try to read profile.role or any profile info safely
+            role = None
+            try:
+                profile = getattr(u, "profile", None)
+                if profile is not None:
+                    role = getattr(profile, "role", None)
+            except Exception:
+                role = None
+
+            out.append(
+                {
+                    "id": u.id,
+                    "username": u.username,
+                    "email": u.email,
+                    "is_active": u.is_active,
+                    "date_joined": u.date_joined.isoformat() if getattr(u, "date_joined", None) else None,
+                    "role": role,
+                }
+            )
+        return Response(out, status=status.HTTP_200_OK)
