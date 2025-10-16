@@ -1,9 +1,11 @@
 // lib/auth_state.dart
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'utils/secure_storage.dart';
+import 'services/auth_service.dart';
 
 class AuthState extends ChangeNotifier {
   // Public flags used throughout the app and router
@@ -21,7 +23,32 @@ class AuthState extends ChangeNotifier {
 
   String? get email => userEmail;
 
-  AuthState();
+  StreamSubscription<bool>? _authSubscription;
+
+  AuthState() {
+    // Subscribe to AuthService auth state changes so the router can refresh immediately
+    try {
+      _authSubscription = AuthService.authStateChanges.listen((loggedInNow) {
+        // If AuthService signals a logout, mark locally and notify
+        if (loggedInNow == false) {
+          markLoggedOutSync();
+        } else {
+          // On login signal, re-sync tokens/profile from storage
+          // Note: do not await here to avoid blocking the listener
+          initFromStorage();
+        }
+      });
+    } catch (e, st) {
+      debugPrint('[AuthState] subscription error: $e\n$st');
+    }
+  }
+
+  /// Clean up subscription when the AuthState is disposed
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
 
   Future<void> initFromStorage() async {
     try {
@@ -34,7 +61,7 @@ class AuthState extends ChangeNotifier {
 
       // Attempt to load profile if logged in and no profile cached
       if (loggedIn && (firstName == null && fullName == null)) {
-        await loadProfileFromApi();
+        unawaited(loadProfileFromApi());
       }
 
       debugPrint(
@@ -89,7 +116,7 @@ class AuthState extends ChangeNotifier {
       debugPrint('[AuthState] setUserEmail -> $email');
       await _createProfileIfNeeded(email);
       // after setting email, attempt to fetch profile
-      await loadProfileFromApi();
+      unawaited(loadProfileFromApi());
     }
     notifyListeners();
   }
@@ -102,7 +129,7 @@ class AuthState extends ChangeNotifier {
       final accessToken = await SecureStorage.read('access');
       if (accessToken == null || accessToken.isEmpty) return;
 
-      // ADAPTEZ CETTE URL à votre backend réel
+      // ADAPTEZ CETTE URL À VOTRE BACKEND RÉEL
       final url = Uri.parse('https://your-backend.com/api/profile/me/');
       final headers = {
         'Authorization': 'Bearer $accessToken',
@@ -176,5 +203,17 @@ class AuthState extends ChangeNotifier {
     } catch (e) {
       debugPrint('[AuthState] Profile creation error: $e');
     }
+  }
+
+  /// Mark logged out synchronously and notify listeners so GoRouter refreshes immediately.
+  void markLoggedOutSync() {
+    loggedIn = false;
+    role = null;
+    userEmail = null;
+    firstName = null;
+    lastName = null;
+    fullName = null;
+    debugPrint('[AuthState] markLoggedOutSync -> loggedIn=false');
+    notifyListeners();
   }
 }

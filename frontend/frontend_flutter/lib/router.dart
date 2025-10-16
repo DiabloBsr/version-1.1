@@ -244,6 +244,8 @@ GoRouter createRouter(AuthState authState) {
               if (!_isValidUuid(id)) {
                 return '/bank-accounts';
               }
+            } else {
+              return '/bank-accounts';
             }
           }
           return null;
@@ -293,7 +295,7 @@ class _BankAccountsRedirectorState extends State<_BankAccountsRedirector> {
     try {
       final profile = await AuthService.getProfile();
       // profile may be Map or null; handle both
-      if (profile == null || profile.isEmpty) {
+      if (profile == null || (profile.isEmpty)) {
         if (mounted) context.go('/login');
         return;
       }
@@ -314,13 +316,13 @@ class _BankAccountsRedirectorState extends State<_BankAccountsRedirector> {
         final id = first['id']?.toString();
         if (id != null && _isValidUuid(id)) {
           // navigate to view of existing account
-          context.go('/bank-account/view/$id');
+          if (mounted) context.go('/bank-account/view/$id');
           return;
         }
       }
 
       // no account found -> go to create
-      context.go('/bank-account/create');
+      if (mounted) context.go('/bank-account/create');
     } catch (e, st) {
       debugPrint('[BankAccountsRedirector] error: $e\n$st');
       if (mounted) {

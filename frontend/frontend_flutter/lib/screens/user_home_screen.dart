@@ -1,13 +1,14 @@
 // lib/screens/user_home_screen.dart
 // ignore_for_file: unused_field
-
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart'; // optional: will attempt to refresh AuthState if provided
 import '../utils/secure_storage.dart';
 import '../services/auth_service.dart';
+import '../auth_state.dart';
 
 class UserHomeScreen extends StatefulWidget {
   const UserHomeScreen({Key? key}) : super(key: key);
@@ -231,15 +232,30 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     return '$apiBaseRoot$trimmed';
   }
 
+  // remplace la méthode _logout existante
   Future<void> _logout(BuildContext context) async {
     if (_loggingOut) return;
     setState(() => _loggingOut = true);
+
     try {
-      await AuthService.logout();
-      // Redirect immediately to the login screen after logout
+      // Use logoutAndClear which calls API logout (best effort) then clearSession()
+      // clearSession updates AuthService.isLoggedInSync via _setLoggedInSync(false)
+      await AuthService.logoutAndClear();
+
+      // If AuthState is provided via Provider, trigger a refresh to notify GoRouter immediately.
+      try {
+        final authState = Provider.of<AuthState>(context, listen: false);
+        // mark logged out synchronously on AuthState to force GoRouter refreshListenable
+        authState.markLoggedOutSync();
+      } catch (_) {
+        // Provider not present or other error: ignore, AuthService already updated its stream/flag
+      }
+
+      // Ensure immediate navigation replacement to login
       if (!mounted) return;
-      context.go('/login'); // ensure direct navigation to login_screen
+      context.go('/login');
     } catch (e) {
+      debugPrint('[UserHome] _logout error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Erreur lors de la déconnexion: $e')));
@@ -525,6 +541,16 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                     fontWeight: FontWeight.w700,
                     color: Theme.of(context).textTheme.bodyMedium?.color)),
             const SizedBox(height: 12),
+
+            // Accueil en haut et marqué actif visuellement
+            MenuButton(
+              icon: Icons.home,
+              label: 'Accueil',
+              onTap: () => context.go('/user-home'),
+              active: true,
+            ),
+            const SizedBox(height: 8),
+
             MenuButton(
               icon: Icons.person,
               label: 'Éditer profil',
@@ -556,7 +582,112 @@ class _UserHomeScreenState extends State<UserHomeScreen>
               icon: Icons.logout,
               label: 'Se déconnecter',
               color: Colors.orange,
-              onTap: () => _logout(context),
+              onTap: () async {
+                debugPrint('[UserHome] logout tapped');
+
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (ctx) {
+                    return AlertDialog(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                      actionsPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      title: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'DECONNEXION',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.6),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.logout,
+                                color: Colors.orange.shade700, size: 24),
+                          ),
+                        ],
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Text(
+                            'Vous allez être déconnecté. Voulez-vous continuer ?',
+                            style: TextStyle(height: 1.4, fontSize: 20),
+                            textAlign: TextAlign.center,
+                          ),
+                          SizedBox(height: 12),
+                        ],
+                      ),
+                      actionsAlignment: MainAxisAlignment.center,
+                      actions: [
+                        TextButton(
+                          style: TextButton.styleFrom(
+                              foregroundColor:
+                                  Theme.of(context).colorScheme.onSurface),
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            child: Text('Annuler'),
+                          ),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.shade600,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            elevation: 0,
+                          ),
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            child: Text('Se déconnecter',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white)),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+                debugPrint('[UserHome] logout confirm result: $confirm');
+                if (confirm != true) return;
+
+                try {
+                  debugPrint('[UserHome] proceeding with logout');
+                  await AuthService.logoutAndClear();
+                } catch (e) {
+                  debugPrint('[UserHome] logout error: $e');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Erreur lors de la déconnexion')));
+                  }
+                } finally {
+                  try {
+                    final authState =
+                        Provider.of<AuthState>(context, listen: false);
+                    authState.markLoggedOutSync();
+                  } catch (_) {}
+                  if (!mounted) return;
+                  context.go('/login');
+                }
+              },
             ),
           ],
         ),
@@ -788,11 +919,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                     ],
                     _recentActivityCard(context),
                     const SizedBox(height: 18),
-                    Center(
-                        child: Text(
-                            'Version app: ${AuthService.appVersion ?? "unknown"}',
-                            style: TextStyle(color: Colors.grey.shade600))),
-                    const SizedBox(height: 24),
                   ]),
             ),
           ),
@@ -930,15 +1056,17 @@ class _UserHomeScreenState extends State<UserHomeScreen>
 class MenuButton extends StatefulWidget {
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color? color;
+  final bool active;
 
   const MenuButton({
     Key? key,
     required this.icon,
     required this.label,
-    required this.onTap,
+    this.onTap,
     this.color,
+    this.active = false,
   }) : super(key: key);
 
   @override
@@ -950,30 +1078,38 @@ class _MenuButtonState extends State<MenuButton> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final bg = _hovering
-        ? Theme.of(context).colorScheme.primary.withOpacity(0.08)
+        ? theme.colorScheme.primary.withOpacity(0.08)
         : Colors.transparent;
-    final iconBg = _hovering ? Theme.of(context).colorScheme.primary : null;
-    final textColor = _hovering ? Theme.of(context).colorScheme.primary : null;
+    final iconBgHover = _hovering ? theme.colorScheme.primary : null;
+    final textColorHover = _hovering ? theme.colorScheme.primary : null;
+
+    final effectiveIconBg = widget.active
+        ? theme.colorScheme.primary
+        : (iconBgHover ?? widget.color ?? Colors.blue.shade700);
+    final effectiveTextColor = widget.active
+        ? theme.colorScheme.primary
+        : (textColorHover ?? theme.textTheme.bodyMedium?.color);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      cursor: SystemMouseCursors.click,
+      cursor:
+          widget.active ? SystemMouseCursors.basic : SystemMouseCursors.click,
       child: Material(
         color: bg,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: widget.onTap,
+          onTap: widget.active ? null : widget.onTap,
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor:
-                      iconBg ?? widget.color ?? Colors.blue.shade700,
+                  backgroundColor: effectiveIconBg,
                   child: Icon(widget.icon, color: Colors.white, size: 18),
                 ),
                 const SizedBox(width: 12),
@@ -981,17 +1117,16 @@ class _MenuButtonState extends State<MenuButton> {
                   child: Text(
                     widget.label,
                     style: TextStyle(
-                      color: textColor ??
-                          Theme.of(context).textTheme.bodyMedium?.color,
+                      color: effectiveTextColor,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-                if (_hovering)
+                if (_hovering && !widget.active)
                   Icon(Icons.arrow_forward_ios,
-                      size: 14,
-                      color: textColor ??
-                          Theme.of(context).textTheme.bodyMedium?.color),
+                      size: 14, color: effectiveTextColor),
+                if (widget.active)
+                  Icon(Icons.check, size: 14, color: theme.colorScheme.primary),
               ],
             ),
           ),

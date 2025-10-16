@@ -1,4 +1,8 @@
 // lib/services/auth_service.dart
+// Comprehensive AuthService with robust logout/logoutAndClear behavior,
+// synchronous auth-state flag and broadcast stream for router refresh.
+
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -12,15 +16,61 @@ import 'package:path/path.dart' as p;
 import '../utils/secure_storage.dart';
 
 class AuthService {
+  // Synchronous logged-in flag consulted by router redirect logic
+  static bool _isLoggedInSync = false;
+  static final StreamController<bool> _authStateController =
+      StreamController<bool>.broadcast();
+
+  static bool get isLoggedInSync => _isLoggedInSync;
+  static Stream<bool> get authStateChanges => _authStateController.stream;
+
+  /// Update sync flag and notify listeners
+  static void _setLoggedInSync(bool value) {
+    _isLoggedInSync = value;
+    try {
+      _authStateController.add(value);
+    } catch (_) {}
+    debugPrint('[AuthService] _setLoggedInSync -> $value');
+  }
+
+  /// Clear local storage keys used for auth. Does NOT call API.
+  static Future<void> clearSession() async {
+    try {
+      await SecureStorage.delete('access');
+      await SecureStorage.delete('refresh');
+      await SecureStorage.delete('user');
+      await SecureStorage.delete('local_activities');
+      await SecureStorage.delete('email');
+      await SecureStorage.delete('role');
+    } catch (e) {
+      debugPrint('[AuthService] clearSession error: $e');
+    }
+    _setLoggedInSync(false);
+  }
+
+  /// Best-effort logout: call backend logout endpoint if available then clear session.
+  /// This method ensures sync state is updated so the router can redirect without page reload.
+  static Future<void> logoutAndClear() async {
+    try {
+      // Attempt API logout (best-effort). Adapt endpoint to your backend.
+      try {
+        await logout();
+      } catch (e) {
+        debugPrint('[AuthService] logout api error (ignored): $e');
+      }
+    } finally {
+      // Ensure local session is cleared and sync flag updated
+      await clearSession();
+    }
+  }
+
   // API constants
-  // Platform-aware apiBase without using dart:io Platform to avoid Web crash
   static String get apiBase {
     if (kIsWeb) return 'http://127.0.0.1:8000/api/v1';
     if (defaultTargetPlatform == TargetPlatform.android) {
-      // Android emulator (AVD) should use 10.0.2.2 to reach host
+      // android emulator host
       return 'http://10.0.2.2:8000/api/v1';
     }
-    // iOS simulator, desktop, etc.
     return 'http://127.0.0.1:8000/api/v1';
   }
 
@@ -28,7 +78,6 @@ class AuthService {
   static String get baseUrl => _apiBaseRoot;
   static String? appVersion;
 
-  /// Build auth headers. If [json] is true, include Content-Type: application/json.
   static Future<Map<String, String>> _authHeaders({
     bool json = true,
     bool acceptJson = true,
@@ -44,7 +93,6 @@ class AuthService {
     return headers;
   }
 
-  /// Save token values safely (trimmed)
   static Future<void> _saveAccessRefresh({
     required String access,
     String? refresh,
@@ -53,9 +101,10 @@ class AuthService {
     if (refresh != null && refresh.trim().isNotEmpty) {
       await SecureStorage.write('refresh', refresh.trim());
     }
+    // Update sync state because tokens are now present
+    _setLoggedInSync(true);
   }
 
-  /// Try refresh using refresh token; return true if refreshed successfully.
   static Future<bool> refreshTokens() async {
     final rawRefresh = await SecureStorage.read('refresh');
     final refresh = rawRefresh?.trim();
@@ -97,6 +146,7 @@ class AuthService {
               '[AuthService] refreshTokens: 401 — clearing local tokens');
           await SecureStorage.delete('access');
           await SecureStorage.delete('refresh');
+          _setLoggedInSync(false);
         }
       }
     } catch (e, st) {
@@ -105,7 +155,6 @@ class AuthService {
     return false;
   }
 
-  /// Login and persist tokens. Returns map with success or error.
   static Future<Map<String, dynamic>> login(
       String email, String password) async {
     try {
@@ -149,8 +198,30 @@ class AuthService {
     }
   }
 
-  /// Clears local storage tokens and any saved auth details
+  /// Logout: try call backend endpoint /auth/logout/ (optional). If no endpoint exists,
+  /// this function still ensures local storage cleared. It does NOT set sync state;
+  /// caller should prefer logoutAndClear which guarantees local clear + _setLoggedInSync(false).
   static Future<void> logout() async {
+    // If you have a backend logout endpoint, call it (best-effort).
+    try {
+      final token = (await SecureStorage.read('access'))?.trim();
+      if (token != null && token.isNotEmpty) {
+        try {
+          final uri = Uri.parse('$baseUrl/auth/logout/');
+          final resp = await http.post(uri, headers: {
+            'Authorization': 'Bearer $token'
+          }).timeout(const Duration(seconds: 8));
+          debugPrint(
+              '[AuthService] logout endpoint: ${resp.statusCode} ${resp.body}');
+        } catch (e) {
+          debugPrint('[AuthService] logout endpoint call failed (ignored): $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[AuthService] logout pre-clean error: $e');
+    }
+
+    // Clear local storage (fallback if deleteAll not available)
     try {
       await SecureStorage.deleteAll();
     } catch (e) {
@@ -168,8 +239,7 @@ class AuthService {
     debugPrint('[AuthService] logout: cleared secure storage');
   }
 
-  /// Generic helper: attempts requestFn with current token, on 401 tries refresh once then retries.
-  /// requestFn should accept a token and return a Future<http.Response>.
+  /// Generic helper for authenticated requests with single retry on 401 after refresh
   static Future<http.Response> authenticatedRequest(
       Future<http.Response> Function(String token) requestFn) async {
     String? token = (await SecureStorage.read('access'))?.trim();
@@ -190,7 +260,6 @@ class AuthService {
     return resp;
   }
 
-  /// Returns profile Map or null. Performs refresh on 401.
   static Future<Map<String, dynamic>?> getProfile() async {
     try {
       final res = await http
@@ -225,15 +294,13 @@ class AuthService {
 
   // --- multipart helpers (mobile + web) ---
 
-  /// Send multipart with optional File (mobile). Default photo field is 'photo'.
   static Future<Map<String, dynamic>> updateProfileRaw({
     required String url,
     required String accessToken,
     required Map<String, String> fields,
     File? photoFile,
     String photoField = 'photo',
-    String method =
-        'PATCH', // 'PATCH' by default; change to 'PUT' or 'POST' if needed
+    String method = 'PATCH',
   }) async {
     try {
       final uri = Uri.parse(url);
@@ -277,7 +344,6 @@ class AuthService {
     }
   }
 
-  /// Send multipart by attaching bytes (web-friendly). Default photo field is 'photo'.
   static Future<Map<String, dynamic>> updateProfileRawFromBytes({
     required String url,
     required String accessToken,
@@ -320,7 +386,6 @@ class AuthService {
     }
   }
 
-  /// Wrapper used by the UI. Returns true on success.
   static Future<bool> updateProfile({
     required String nom,
     required String prenom,
@@ -380,7 +445,6 @@ class AuthService {
     return false;
   }
 
-  /// Web-friendly wrapper: sends bytes + filename.
   static Future<bool> updateProfileWithBytes({
     required String nom,
     required String prenom,
@@ -456,7 +520,6 @@ class AuthService {
     }
   }
 
-  /// Fetch protected bytes (used for avatar preview).
   static Future<Uint8List?> fetchBytes(String url, String? accessToken) async {
     try {
       final headers = <String, String>{'Accept': 'application/octet-stream'};
@@ -486,9 +549,6 @@ class AuthService {
     return null;
   }
 
-  /// POST a user activity to the server.
-  /// activity must contain at least: text (String), type (optional), timestamp (optional), meta (optional).
-  /// Returns true if persisted (201 created) or false otherwise.
   static Future<bool> postActivity(Map<String, dynamic> activity) async {
     final token = (await SecureStorage.read('access'))?.trim();
     if (token == null || token.isEmpty) return false;
@@ -518,9 +578,6 @@ class AuthService {
     return false;
   }
 
-  /// POST a batch of activities to the server.
-  /// Payload: { "activities": [ {...}, ... ] }
-  /// Returns decoded server response map or null on failure.
   static Future<Map<String, dynamic>?> postActivitiesBatch(
       List<Map<String, dynamic>> activities) async {
     final token = (await SecureStorage.read('access'))?.trim();
@@ -550,8 +607,6 @@ class AuthService {
     return null;
   }
 
-  /// Get activities for current user. Uses /activities/ endpoint with optional query params.
-  /// Returns list of maps (may be empty).
   static Future<List<Map<String, dynamic>>> getActivities(
       {int limit = 100, String? type, int? page}) async {
     final token = (await SecureStorage.read('access'))?.trim();
@@ -600,7 +655,6 @@ class AuthService {
 
   // --- Bank account helper methods used by UI ---
 
-  /// Get bank accounts for a profile. Returns list (may be empty) or null on auth error.
   static Future<List<Map<String, dynamic>>?> getBankAccounts(
       {required String profileId}) async {
     final token = (await SecureStorage.read('access'))?.trim();
@@ -637,7 +691,6 @@ class AuthService {
     return null;
   }
 
-  /// Get a single bank account by id.
   static Future<Map<String, dynamic>?> getBankAccount(String id) async {
     final token = (await SecureStorage.read('access'))?.trim();
     if (token == null || token.isEmpty) return null;
@@ -663,7 +716,6 @@ class AuthService {
     return null;
   }
 
-  /// Create a bank account. Returns created object map or null.
   static Future<Map<String, dynamic>?> createBankAccount(
       Map<String, dynamic> payload) async {
     final token = (await SecureStorage.read('access'))?.trim();
@@ -682,7 +734,6 @@ class AuthService {
       if (resp.statusCode == 201 || resp.statusCode == 200) {
         final created = Map<String, dynamic>.from(
             jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
-        // best-effort: record change activity asynchronously
         try {
           notifyBankAccountChange(
               action: 'create',
@@ -706,7 +757,6 @@ class AuthService {
     return null;
   }
 
-  /// Delete a bank account. Returns true on success (204/200).
   static Future<bool> deleteBankAccount(String id) async {
     String? token = (await SecureStorage.read('access'))?.trim();
     if (token == null || token.isEmpty) {
@@ -730,7 +780,6 @@ class AuthService {
         debugPrint('[AuthService] DELETE ${resp.statusCode} ${resp.body}');
 
         if (resp.statusCode == 200 || resp.statusCode == 204) {
-          // record deletion activity asynchronously
           try {
             notifyBankAccountChange(
                 action: 'delete', accountId: id, detail: null);
@@ -780,7 +829,6 @@ class AuthService {
 
   // --- Bank account change activity helpers (local counter + tagged activity) ---
 
-  /// Internal: increment local bank account change counter and return new value.
   static Future<int> _incrementBankAccountChangeCount() async {
     final key = 'bank_account_change_count';
     try {
@@ -796,9 +844,46 @@ class AuthService {
     }
   }
 
-  /// Internal: post an activity describing the bank account change with a specific tag.
+  static Future<bool> verifyPassword(String password) async {
+    try {
+      final token = await SecureStorage.read('access');
+      // AuthService.apiBase doit contenir le préfixe /api/v1, par ex. https://api.example.com/api/v1
+      final uri = Uri.parse('${AuthService.apiBase}/auth/verify-password/');
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+      final body = jsonEncode({'password': password});
+
+      debugPrint(
+          '[AuthService] verifyPassword -> POST $uri headers=${headers.keys.toList()} body_length=${password.length}');
+
+      final resp = await http
+          .post(uri, headers: headers, body: body)
+          .timeout(const Duration(seconds: 10));
+
+      debugPrint(
+          '[AuthService] verifyPassword response status=${resp.statusCode} body=${resp.body}');
+
+      if (resp.statusCode == 200) {
+        final Map<String, dynamic> data =
+            jsonDecode(resp.body) as Map<String, dynamic>;
+        if (data.containsKey('verified')) return data['verified'] == true;
+        if (data.containsKey('success')) return data['success'] == true;
+        // If response is 200 but does not include explicit flags, assume success is false to be safe
+        return false;
+      }
+
+      // Non-200 responses should be treated as failure
+      return false;
+    } catch (e, st) {
+      debugPrint('[AuthService] verifyPassword error: $e\n$st');
+      return false;
+    }
+  }
+
   static Future<bool> _postBankAccountChangeActivity({
-    required String action, // e.g. "create", "update", "delete"
+    required String action,
     required String accountId,
     Map<String, dynamic>? detail,
   }) async {
@@ -820,21 +905,18 @@ class AuthService {
       },
     };
 
-    // reuse postActivity which performs token refresh on 401
     final posted = await postActivity(activity);
     return posted;
   }
 
-  /// Public convenience: notify the service that a bank account changed (call after successful update/create/delete).
   static Future<bool> notifyBankAccountChange({
-    required String action, // "create" | "update" | "delete"
+    required String action,
     required String accountId,
     Map<String, dynamic>? detail,
   }) =>
       _postBankAccountChangeActivity(
           action: action, accountId: accountId, detail: detail);
 
-  /// Utility: fetch the current local bank account change count
   static Future<int> getBankAccountChangeCount() async {
     try {
       final raw = await SecureStorage.read('bank_account_change_count');
@@ -845,8 +927,6 @@ class AuthService {
     }
   }
 
-  /// Create a bank-account update helper (client-side) — not strictly required but convenient:
-  /// call this after a successful update to notify and increment local counter.
   static Future<void> recordBankAccountUpdate({
     required String accountId,
     Map<String, dynamic>? detail,

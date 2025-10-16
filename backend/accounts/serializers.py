@@ -4,7 +4,6 @@ from rest_framework import serializers
 
 User = get_user_model()
 
-
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
 
@@ -24,3 +23,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+
+class VerifyPasswordSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, min_length=1)
