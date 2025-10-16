@@ -1,4 +1,3 @@
-// lib/screens/profile_extra_screen.dart
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -22,6 +21,7 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
   final adresseCtrl = TextEditingController();
 
   DateTime? birthDate;
+  DateTime? cinIssueDate;
   String? sexe;
   bool loading = false;
   bool _isHovering = false;
@@ -75,16 +75,25 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
+  Future<void> _pickDate({required bool forBirth}) async {
     final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
-      initialDate: now.subtract(const Duration(days: 365 * 25)),
+      initialDate:
+          forBirth ? now.subtract(const Duration(days: 365 * 25)) : now,
       firstDate: DateTime(1900),
       lastDate: now,
     );
     if (!mounted) return;
-    if (picked != null) setState(() => birthDate = picked);
+    if (picked != null) {
+      setState(() {
+        if (forBirth) {
+          birthDate = picked;
+        } else {
+          cinIssueDate = picked;
+        }
+      });
+    }
   }
 
   InputDecoration _inputDecoration({required String label}) {
@@ -130,7 +139,7 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
     if (username == null || username!.isEmpty) {
       if (!mounted) return;
       setState(() {
-        errorText = 'Username manquant';
+        errorText = 'Nom d\'utilisateur manquant';
         loading = false;
       });
       return;
@@ -149,6 +158,7 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
         cinCtrl.text.isNotEmpty ||
         adresseCtrl.text.isNotEmpty ||
         birthDate != null ||
+        cinIssueDate != null ||
         (sexe != null && sexe!.isNotEmpty);
     if (!anyProfileField) {
       if (!mounted) return;
@@ -167,18 +177,17 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
       if (lastName != null && lastName!.isNotEmpty) 'last_name': lastName,
     };
 
+    // Profile payload: only profile fields, omit email/username and omit role
     final profilePayload = <String, dynamic>{
-      if (firstName != null && firstName!.isNotEmpty) 'prenom': firstName,
-      if (lastName != null && lastName!.isNotEmpty) 'nom': lastName,
       if (phoneCtrl.text.isNotEmpty) 'telephone': phoneCtrl.text.trim(),
-      if (lieuCtrl.text.isNotEmpty) 'lieu_naissance': lieuCtrl.text.trim(),
-      if (cinCtrl.text.isNotEmpty) 'cin_numero': cinCtrl.text.trim(),
-      if (adresseCtrl.text.isNotEmpty) 'adresse': adresseCtrl.text.trim(),
       if (birthDate != null)
         'date_naissance': birthDate!.toIso8601String().split('T').first,
+      if (lieuCtrl.text.isNotEmpty) 'lieu_naissance': lieuCtrl.text.trim(),
+      if (cinCtrl.text.isNotEmpty) 'cin_numero': cinCtrl.text.trim(),
+      if (cinIssueDate != null)
+        'cin_date_delivrance': cinIssueDate!.toIso8601String().split('T').first,
+      if (adresseCtrl.text.isNotEmpty) 'adresse': adresseCtrl.text.trim(),
       if (sexe != null && sexe!.isNotEmpty) 'sexe': sexe,
-      if (email != null) 'email': email,
-      if (username != null) 'username': username,
     };
 
     debugPrint('profilePayload to send: ${jsonEncode(profilePayload)}');
@@ -340,6 +349,40 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
     }
   }
 
+  Widget _headerCard() {
+    // Affiche l'email et le nom d'utilisateur en haut si disponibles
+    return Card(
+      color: Colors.grey.shade100,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (email != null && email!.isNotEmpty)
+            Row(
+              children: [
+                const Icon(Icons.email, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text('Email : $email',
+                        style: const TextStyle(fontWeight: FontWeight.w600))),
+              ],
+            ),
+          if (username != null && username!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.person, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text('Nom d\'utilisateur : $username')),
+                ],
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
   Widget _styledActionButton() {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovering = true),
@@ -421,17 +464,36 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
     );
   }
 
-  Widget _headerCard() {
-    final fullName = '${firstName ?? ''} ${lastName ?? ''}'.trim();
-    return Card(
-      color: Colors.grey.shade100,
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (email != null && email!.isNotEmpty) Text('📧 Email : $email'),
-          if (fullName.isNotEmpty) Text('👤 Nom : $fullName'),
-        ]),
+  Widget _dateDisplay(String label, DateTime? date, VoidCallback onPick) {
+    return InkWell(
+      onTap: onPick,
+      child: InputDecorator(
+        decoration: InputDecoration(
+          label: Text(label),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                date == null
+                    ? ''
+                    : date.toLocal().toIso8601String().split('T').first,
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.calendar_today, size: 18),
+              onPressed: onPick,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -458,8 +520,7 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
                     children: [
                       const SizedBox(height: 6),
                       if ((email != null && email!.isNotEmpty) ||
-                          (firstName != null && firstName!.isNotEmpty) ||
-                          (lastName != null && lastName!.isNotEmpty))
+                          (username != null && username!.isNotEmpty))
                         _headerCard(),
                       const SizedBox(height: 6),
                       if (errorText != null)
@@ -527,28 +588,48 @@ class _ProfileExtraScreenState extends State<ProfileExtraScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      TextFormField(
-                          controller: lieuCtrl,
-                          decoration:
-                              _inputDecoration(label: 'Lieu de naissance')),
+                      // Date of birth (left) and Place of birth (right) side by side
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 1,
+                            child: _dateDisplay('Date de naissance', birthDate,
+                                () => _pickDate(forBirth: true)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 1,
+                            child: TextFormField(
+                                controller: lieuCtrl,
+                                decoration: _inputDecoration(
+                                    label: 'Lieu de naissance')),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 12),
-                      TextFormField(
-                          controller: cinCtrl,
-                          decoration: _inputDecoration(label: 'Numéro CIN')),
+                      // CIN number and CIN issue date side by side (number left, issue date right)
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 1,
+                            child: TextFormField(
+                                controller: cinCtrl,
+                                decoration:
+                                    _inputDecoration(label: 'Numéro CIN')),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 1,
+                            child: _dateDisplay('Date délivrance CIN',
+                                cinIssueDate, () => _pickDate(forBirth: false)),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 12),
                       TextFormField(
                           controller: adresseCtrl,
                           decoration: _inputDecoration(label: 'Adresse'),
                           maxLines: 3),
-                      const SizedBox(height: 12),
-                      ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(birthDate == null
-                              ? 'Date de naissance'
-                              : 'Date: ${birthDate!.toLocal().toIso8601String().split("T").first}'),
-                          trailing: IconButton(
-                              icon: const Icon(Icons.calendar_today),
-                              onPressed: _pickDate)),
                       const SizedBox(height: 16),
                       _styledActionButton(),
                       const SizedBox(height: 12),

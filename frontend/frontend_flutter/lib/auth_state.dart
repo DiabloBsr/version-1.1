@@ -8,20 +8,13 @@ import 'utils/secure_storage.dart';
 class AuthState extends ChangeNotifier {
   // Public flags used throughout the app and router
   bool loggedIn = false;
-  bool otpVerified = false;
   String? role;
-  bool? mfaEnabled;
   String? userEmail;
 
-  // Profile fields (nouveaux)
+  // Profile fields
   String? firstName;
   String? lastName;
   String? fullName;
-
-  // Nouveautés pour connexion en deux étapes
-  bool pendingLogin = false;
-  String? pendingEmail;
-  String? pendingTempToken;
 
   bool _initialized = false;
   bool get initialized => _initialized;
@@ -35,12 +28,7 @@ class AuthState extends ChangeNotifier {
       final access = await SecureStorage.read('access');
       loggedIn = access != null && access.isNotEmpty;
 
-      final otp = await SecureStorage.read('otp_verified');
-      otpVerified = otp == 'true';
-
       role = await SecureStorage.read('role');
-      final me = await SecureStorage.read('mfa_enabled');
-      mfaEnabled = me == null ? null : (me == 'true');
 
       userEmail = await SecureStorage.read('email');
 
@@ -48,10 +36,6 @@ class AuthState extends ChangeNotifier {
       if (loggedIn && (firstName == null && fullName == null)) {
         await loadProfileFromApi();
       }
-
-      pendingLogin = false;
-      pendingEmail = null;
-      pendingTempToken = null;
 
       debugPrint(
           '[AuthState] initFromStorage loggedIn=$loggedIn userEmail=$userEmail role=$role');
@@ -74,24 +58,12 @@ class AuthState extends ChangeNotifier {
   Future<void> clearAll() async {
     await SecureStorage.deleteAll();
     loggedIn = false;
-    otpVerified = false;
     role = null;
-    mfaEnabled = null;
     userEmail = null;
     firstName = null;
     lastName = null;
     fullName = null;
-    pendingLogin = false;
-    pendingEmail = null;
-    pendingTempToken = null;
     debugPrint('[AuthState] clearAll');
-    notifyListeners();
-  }
-
-  Future<void> setOtpVerified(bool v) async {
-    otpVerified = v;
-    await SecureStorage.write('otp_verified', v ? 'true' : 'false');
-    debugPrint('[AuthState] setOtpVerified -> $v');
     notifyListeners();
   }
 
@@ -103,18 +75,6 @@ class AuthState extends ChangeNotifier {
     } else {
       await SecureStorage.write('role', r);
       debugPrint('[AuthState] setRole -> $r');
-    }
-    notifyListeners();
-  }
-
-  Future<void> setMfaEnabled(bool? enabled) async {
-    mfaEnabled = enabled;
-    if (enabled == null) {
-      await SecureStorage.delete('mfa_enabled');
-      debugPrint('[AuthState] setMfaEnabled -> null');
-    } else {
-      await SecureStorage.write('mfa_enabled', enabled ? 'true' : 'false');
-      debugPrint('[AuthState] setMfaEnabled -> $enabled');
     }
     notifyListeners();
   }
@@ -132,14 +92,6 @@ class AuthState extends ChangeNotifier {
       await loadProfileFromApi();
     }
     notifyListeners();
-  }
-
-  void setPendingLogin(bool v) {
-    if (pendingLogin != v) {
-      pendingLogin = v;
-      debugPrint('[AuthState] setPendingLogin -> $v');
-      notifyListeners();
-    }
   }
 
   // ---- Profile fetching helper ----
@@ -198,108 +150,6 @@ class AuthState extends ChangeNotifier {
     } catch (e, st) {
       debugPrint('[AuthState] loadProfileFromApi error: $e\n$st');
     }
-  }
-
-  // ---- Flow two-step helpers (inchangés sauf ajout du loadProfileFromApi post-login) ----
-
-  Future<void> startPendingLogin({
-    required String email,
-    required String password,
-    required Uri loginUri,
-  }) async {
-    pendingLogin = false;
-    pendingEmail = null;
-    pendingTempToken = null;
-    notifyListeners();
-
-    try {
-      final res = await http.post(
-        loginUri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'password': password}),
-      );
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['access'] != null && data['refresh'] != null) {
-          await setTokens(data['access'], data['refresh']);
-          await setUserEmail(email);
-          if (data['mfa_enabled'] != null)
-            await setMfaEnabled(data['mfa_enabled']);
-          if (data['role'] != null) await setRole(data['role']);
-          await setOtpVerified(true);
-          // fetch profile now
-          await loadProfileFromApi();
-          return;
-        }
-
-        if (data['otp_required'] == true) {
-          pendingLogin = true;
-          pendingEmail = email;
-          pendingTempToken = data['temp_token']?.toString();
-          debugPrint('[AuthState] startPendingLogin -> pendingLogin=true');
-          notifyListeners();
-          return;
-        }
-      }
-
-      debugPrint(
-          '[AuthState] startPendingLogin failed: ${res.statusCode} ${res.body}');
-    } catch (e) {
-      debugPrint('[AuthState] startPendingLogin error: $e');
-    }
-  }
-
-  Future<bool> confirmOtp({
-    required String otpCode,
-    required Uri verifyUri,
-  }) async {
-    if (!pendingLogin || pendingEmail == null) return false;
-
-    try {
-      final body = {
-        'email': pendingEmail,
-        'otp': otpCode,
-        if (pendingTempToken != null) 'temp_token': pendingTempToken,
-      };
-      final res = await http.post(
-        verifyUri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      );
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['access'] != null && data['refresh'] != null) {
-          await setTokens(data['access'], data['refresh']);
-          await setUserEmail(pendingEmail);
-          if (data['mfa_enabled'] != null)
-            await setMfaEnabled(data['mfa_enabled']);
-          if (data['role'] != null) await setRole(data['role']);
-          await setOtpVerified(true);
-          pendingLogin = false;
-          pendingEmail = null;
-          pendingTempToken = null;
-          notifyListeners();
-          // fetch profile now
-          await loadProfileFromApi();
-          return true;
-        }
-      }
-
-      debugPrint(
-          '[AuthState] confirmOtp failed: ${res.statusCode} ${res.body}');
-    } catch (e) {
-      debugPrint('[AuthState] confirmOtp error: $e');
-    }
-    return false;
-  }
-
-  void cancelPendingLogin() {
-    pendingLogin = false;
-    pendingEmail = null;
-    pendingTempToken = null;
-    notifyListeners();
   }
 
   Future<void> _createProfileIfNeeded(String email) async {

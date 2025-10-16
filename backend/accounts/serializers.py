@@ -1,11 +1,8 @@
+# accounts/serializers.py
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 User = get_user_model()
-
-
-class TOTPVerifySerializer(serializers.Serializer):
-    otp = serializers.CharField(write_only=True)
 
 
 class RegisterSerializer(serializers.ModelSerializer):

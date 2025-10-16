@@ -72,50 +72,33 @@ class _LoginScreenState extends State<LoginScreen> {
 
         final storedRole = await SecureStorage.read('role');
         final storedEmail = await SecureStorage.read('email');
-        final storedMfa = await SecureStorage.read('mfa_enabled');
-        final storedOtp = await SecureStorage.read('otp_verified');
 
         if (profile != null) {
           final role = (profile['role'] as String?) ?? storedRole;
           final emailVal = (profile['user'] is Map)
               ? profile['user']['email'] as String?
               : storedEmail;
-          final mfaEnabled =
-              profile['mfa_enabled'] == true || storedMfa == 'true';
-          final otp = profile['otp_verified'] == true ||
-              profile['otp_verified'] == 'true' ||
-              storedOtp == 'true';
 
           if (role != null) await auth.setRole(role);
           if (emailVal != null) await auth.setUserEmail(emailVal);
-          await auth.setMfaEnabled(mfaEnabled);
-          if (otp) await auth.setOtpVerified(true);
         } else {
           if (storedRole != null) await auth.setRole(storedRole);
           if (storedEmail != null) await auth.setUserEmail(storedEmail);
-          await auth.setMfaEnabled(storedMfa == 'true');
-          if (storedOtp == 'true') await auth.setOtpVerified(true);
         }
 
         if (!mounted) return;
 
-        debugPrint(
-            '[Login] auth.loggedIn=${auth.loggedIn}, otpVerified=${auth.otpVerified}, mfaEnabled=${auth.mfaEnabled}, role=${auth.role}');
-        if (auth.loggedIn && auth.otpVerified) {
-          final r = auth.role?.toLowerCase();
-          if (r == 'admin') {
-            context.go('/dashboard');
-          } else if (r == 'user') {
-            context.go('/user-home');
-          } else {
-            context.go('/home');
-          }
+        debugPrint('[Login] auth.loggedIn=${auth.loggedIn}, role=${auth.role}');
+
+        // Direct redirection after successful login based on role
+        final roleNormalized = auth.role?.toLowerCase() ?? '';
+
+        if (roleNormalized.contains('admin')) {
+          context.go('/dashboard');
+        } else if (roleNormalized.contains('user')) {
+          context.go('/user-home');
         } else {
-          if (auth.mfaEnabled == true) {
-            context.go('/mfa-verify');
-          } else {
-            context.go('/mfa-setup');
-          }
+          context.go('/home');
         }
       } else {
         String message = "Échec de connexion";
@@ -247,12 +230,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white),
                           )
-                        : const Icon(
-                            Icons.login,
+                        : const Icon(Icons.login,
                             key: ValueKey('login_icon'),
                             size: 18,
-                            color: Colors.white,
-                          ),
+                            color: Colors.white),
                   ),
                   const SizedBox(width: 12),
                   AnimatedDefaultTextStyle(

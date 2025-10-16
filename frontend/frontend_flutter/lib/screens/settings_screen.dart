@@ -29,7 +29,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       _email = await SecureStorage.read('email');
       _role = await SecureStorage.read('role');
-      // Lightweight theme inference: store theme in storage if you have one
       final theme = await SecureStorage.read('dark_mode');
       _darkMode = theme == 'true';
     } catch (e) {
@@ -46,7 +45,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       debugPrint('Failed saving theme: $e');
     }
-    // Optionally notify app theme change via some app-level mechanism
   }
 
   Future<void> _clearCache() async {
@@ -87,7 +85,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       debugPrint('Logout error: $e');
     } finally {
-      // clear storage minimally and navigate to login
       try {
         await SecureStorage.delete('access');
         await SecureStorage.delete('refresh');
@@ -104,7 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(
         title: const Text('Paramètres'),
         actions: [
-          IconButton(onPressed: _loadSettings, icon: const Icon(Icons.refresh)),
+          IconButton(onPressed: _loadSettings, icon: const Icon(Icons.refresh))
         ],
       ),
       body: _loading
@@ -126,12 +123,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onChanged: _toggleDarkMode,
                         title: const Text('Mode sombre'),
                         secondary: const Icon(Icons.brightness_6),
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.lock),
-                        title: const Text('Sécurité'),
-                        subtitle: const Text('Gérer MFA et mots de passe'),
-                        onTap: () => context.go('/mfa-setup'),
                       ),
                       ListTile(
                         leading: const Icon(Icons.payment),

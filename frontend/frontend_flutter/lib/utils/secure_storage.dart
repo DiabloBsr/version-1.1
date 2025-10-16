@@ -23,8 +23,6 @@ class SecureStorage {
     'pending_profile',
     'email',
     'role',
-    'mfa_enabled',
-    'otp_verified',
     'dark_mode',
   ];
 

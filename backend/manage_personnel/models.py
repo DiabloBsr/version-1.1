@@ -6,19 +6,11 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import FileExtensionValidator
 
+
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(_("email address"), unique=True)
     phone_number = models.CharField(max_length=25, blank=True, null=True, unique=True)
-
-    is_mfa_enabled = models.BooleanField(default=False)
-    totp_secret = models.CharField(max_length=64, null=True, blank=True)
-    is_mfa_verified = models.BooleanField(default=False)
-    preferred_2fa = models.CharField(
-        max_length=20,
-        choices=(("totp", "TOTP"), ("sms", "SMS")),
-        default="totp",
-    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -37,17 +29,6 @@ class User(AbstractUser):
             full = f"{nom} {prenom}".strip()
             return full if full else self.username
         return self.username
-
-    def enable_mfa(self, method="totp"):
-        self.is_mfa_enabled = True
-        self.preferred_2fa = method
-        self.save(update_fields=["is_mfa_enabled", "preferred_2fa"])
-
-    def disable_mfa(self):
-        self.is_mfa_enabled = False
-        self.totp_secret = None
-        self.is_mfa_verified = False
-        self.save(update_fields=["is_mfa_enabled", "totp_secret", "is_mfa_verified"])
 
     class Meta:
         ordering = ("-created_at",)

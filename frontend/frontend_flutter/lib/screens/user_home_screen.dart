@@ -212,8 +212,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
       List existing = raw != null ? jsonDecode(raw) as List : [];
       existing = [...normalized, ...existing];
       await SecureStorage.write('local_activities', jsonEncode(existing));
-      debugPrint(
-          '[UserHome] stored local activities (fallback): ${normalized.length}');
+      debugPrint('[UserHome] stored local activities: ${normalized.length}');
     } catch (e) {
       debugPrint('[UserHome] failed to store local activities: $e');
     }
@@ -237,14 +236,14 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     setState(() => _loggingOut = true);
     try {
       await AuthService.logout();
+      // Redirect immediately to the login screen after logout
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Déconnecté')));
-      context.go('/login');
+      context.go('/login'); // ensure direct navigation to login_screen
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Erreur lors de la déconnexion: $e')));
+      }
     } finally {
       if (mounted) setState(() => _loggingOut = false);
     }
@@ -316,7 +315,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
           'raw': s,
           'synced': true,
         };
-        // attach category
         item['category'] = _detectCategory(s);
         merged.add(item);
         seen.add(key);
@@ -336,8 +334,9 @@ class _UserHomeScreenState extends State<UserHomeScreen>
         if (meta is Map) {
           final resource = (meta['resource'] as String?) ??
               (meta['resource_type'] as String?);
-          if (resource != null && resource.toLowerCase().contains('bank'))
+          if (resource != null && resource.toLowerCase().contains('bank')) {
             return 'bank_account';
+          }
           final source = (meta['source'] as String?) ?? '';
           if (source.toLowerCase().contains('bank')) return 'bank_account';
           final accountId = meta['account_id'] ?? meta['resource_id'];
@@ -354,8 +353,11 @@ class _UserHomeScreenState extends State<UserHomeScreen>
         }
       } else {
         final s = entry.toString().toLowerCase();
-        if (s.contains('compte') || s.contains('banque') || s.contains('iban'))
+        if (s.contains('compte') ||
+            s.contains('banque') ||
+            s.contains('iban')) {
           return 'bank_account';
+        }
       }
     } catch (_) {}
     return 'general';
@@ -363,8 +365,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
 
   Widget _recentActivityCard(BuildContext context) {
     final combined = _combinedActivities;
-
-    // We always show recent activities and differentiate with tags instead of a filter toggle
     final filtered = combined; // show all, tags indicate types
 
     if (filtered.isEmpty) {
@@ -409,7 +409,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                     child: Text('Activité récente',
                         style: TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700))),
-                // Removed toggle buttons; tags will indicate category
               ],
             )),
         ...filtered.take(6).map((a) {
@@ -419,7 +418,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
           final synced = a['synced'] == true;
           final category = a['category'] as String? ?? 'general';
 
-          // Tag widget
           Widget tagFor(String category) {
             if (category == 'bank_account') {
               return Container(
@@ -477,7 +475,6 @@ class _UserHomeScreenState extends State<UserHomeScreen>
               tagFor(category),
             ]),
             onTap: () {
-              // Always route to bank accounts list for bank activities so user can select
               if (a['category'] == 'bank_account') {
                 context.go('/bank-accounts');
               } else {
@@ -504,54 +501,66 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     }
   }
 
-  Widget _actionsCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
+  // Left-side fixed menu (with hover effect)
+  Widget _leftFixedMenu(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 260),
+      child: Container(
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
-                color: Colors.black12,
-                blurRadius: 12,
-                offset: const Offset(0, 6))
-          ]),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Text('Actions rapides',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 10),
-        ElevatedButton.icon(
-            onPressed: () async {
-              final prev = _profile == null
-                  ? null
-                  : Map<String, dynamic>.from(_profile!);
-              await context.push('/profile/edit');
-              await _loadAll(previousProfile: prev);
-            },
-            icon: const Icon(Icons.edit),
-            label: const Text('Éditer profil')),
-        const SizedBox(height: 8),
-        ElevatedButton.icon(
-            onPressed: () {
-              // Redirect to bank accounts list instead of directly to a specific view
-              context.go(
-                  _hasBankAccount ? '/bank-accounts' : '/bank-account/create');
-            },
-            icon: const Icon(Icons.account_balance),
-            label: Text(_hasBankAccount
-                ? 'Afficher compte bancaire'
-                : 'Ajouter compte bancaire')),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-            onPressed: () => _logout(context),
-            icon: _loggingOut
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.logout),
-            label: const Text('Se déconnecter')),
-      ]),
+                color: Colors.black12, blurRadius: 10, offset: Offset(0, 6))
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Actions rapides',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).textTheme.bodyMedium?.color)),
+            const SizedBox(height: 12),
+            MenuButton(
+              icon: Icons.person,
+              label: 'Éditer profil',
+              onTap: () async {
+                final prev = _profile == null
+                    ? null
+                    : Map<String, dynamic>.from(_profile!);
+                await context.push('/profile/edit');
+                await _loadAll(previousProfile: prev);
+              },
+            ),
+            const SizedBox(height: 8),
+            MenuButton(
+              icon: Icons.account_balance,
+              label: _hasBankAccount
+                  ? 'Afficher compte bancaire'
+                  : 'Ajouter compte bancaire',
+              onTap: () => context.go(
+                  _hasBankAccount ? '/bank-accounts' : '/bank-account/create'),
+            ),
+            const SizedBox(height: 8),
+            MenuButton(
+              icon: Icons.history,
+              label: 'Historique',
+              onTap: () => context.go('/history'),
+            ),
+            const SizedBox(height: 8),
+            MenuButton(
+              icon: Icons.logout,
+              label: 'Se déconnecter',
+              color: Colors.orange,
+              onTap: () => _logout(context),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -563,69 +572,99 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     final displayName = nameParts.isNotEmpty
         ? nameParts.join(' ')
         : (_profile?['user']?['email'] as String?) ?? _email ?? 'Utilisateur';
-    final role = (_profile?['role'] as String?) ?? 'user';
     final email = (_profile?['user']?['email'] as String?) ??
         _profile?['email'] as String? ??
         _email;
 
+    // Dynamic bank message: if linked, show bank name; else prompt to link
+    String bankMessage;
+    if (_hasBankAccount && _bankAccounts.isNotEmpty) {
+      final bank = _bankAccounts.first;
+      final bankName =
+          (bank['bank_name'] ?? bank['bank'] ?? bank['name'] ?? 'Banque')
+              .toString();
+      bankMessage = 'Compte bancaire $bankName lié';
+    } else {
+      bankMessage = 'Veuillez lier un compte bancaire';
+    }
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black12,
-                blurRadius: 14,
-                offset: const Offset(0, 6))
-          ]),
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 14, offset: Offset(0, 6))
+        ],
+      ),
       child: Row(children: [
         _buildAvatar(36),
         const SizedBox(width: 14),
         Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(displayName,
-              style:
-                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Row(children: [
-            Icon(Icons.email_outlined, size: 14, color: Colors.grey.shade600),
-            const SizedBox(width: 6),
-            Flexible(
-                child: Text(email ?? '',
-                    style: TextStyle(color: Colors.grey.shade700)))
-          ]),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 6, children: [
-            Chip(
-                label: Text(role.toUpperCase()),
-                backgroundColor: const Color.fromARGB(255, 103, 216, 113)),
-            if ((_profile?['mfa_enabled'] as bool? ?? false))
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(displayName,
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Row(children: [
+              Icon(Icons.email_outlined, size: 14, color: Colors.grey.shade600),
+              const SizedBox(width: 6),
+              Flexible(
+                  child: Text(email ?? '',
+                      style: TextStyle(color: Colors.grey.shade700)))
+            ]),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              // Bank message chip with contextual action
               Chip(
-                  label: const Text('MFA activée'),
-                  backgroundColor: const Color.fromARGB(202, 192, 196, 66))
-            else
-              ActionChip(
-                  label: const Text('Configurer MFA'),
-                  onPressed: () => context.go('/mfa-setup')),
+                label: Text(bankMessage),
+                backgroundColor: _hasBankAccount
+                    ? Colors.green.shade50
+                    : Colors.orange.shade50,
+                labelStyle: TextStyle(
+                    color: _hasBankAccount
+                        ? Colors.green.shade800
+                        : Colors.orange.shade800),
+              ),
+              if (!_hasBankAccount)
+                ActionChip(
+                  label: const Text('Lier un compte'),
+                  onPressed: () => context.go('/bank-account/create'),
+                )
+              else
+                ActionChip(
+                  label: const Text('Voir le compte'),
+                  onPressed: () => context.go('/bank-accounts'),
+                ),
+              // Optional employment status chip if present
+              if ((_profile?['employment'] as String?) != null &&
+                  (_profile!['employment'] as String).trim().isNotEmpty)
+                Chip(
+                  label:
+                      Text((_profile!['employment'] as String).toUpperCase()),
+                  backgroundColor: Colors.blue.shade50,
+                  labelStyle: TextStyle(color: Colors.blue.shade800),
+                ),
+            ]),
           ]),
-        ])),
+        ),
         IconButton(
-            icon: const Icon(Icons.edit),
-            tooltip: 'Éditer le profil',
-            onPressed: () async {
-              final prev = _profile == null
-                  ? null
-                  : Map<String, dynamic>.from(_profile!);
-              await context.push('/profile/edit');
-              await _loadAll(previousProfile: prev);
-            }),
+          icon: const Icon(Icons.edit),
+          tooltip: 'Éditer le profil',
+          onPressed: () async {
+            final prev =
+                _profile == null ? null : Map<String, dynamic>.from(_profile!);
+            await context.push('/profile/edit');
+            await _loadAll(previousProfile: prev);
+          },
+        ),
       ]),
     );
   }
 
-  Widget _quickActionsGrid(BuildContext context) {
+  Widget _quickActionsGridPlaceholder(BuildContext context) {
+    // kept for layout consistency on narrow screens — actions moved to left menu
     final crossCount = MediaQuery.of(context).size.width > 720 ? 4 : 2;
     return GridView.count(
       physics: const NeverScrollableScrollPhysics(),
@@ -634,27 +673,27 @@ class _UserHomeScreenState extends State<UserHomeScreen>
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
       children: [
-        _quickAction(context, Icons.person, 'Éditer profil', () async {
+        _quickTile(context, Icons.person, 'Éditer profil', () async {
           final prev =
               _profile == null ? null : Map<String, dynamic>.from(_profile!);
           await context.push('/profile/edit');
           await _loadAll(previousProfile: prev);
         }),
-        _quickAction(context, Icons.verified_user, 'Gérer MFA',
-            () => context.go('/mfa-setup')),
-        _quickAction(context, Icons.account_balance,
+        _quickTile(context, Icons.account_balance,
             _hasBankAccount ? 'Compte bancaire' : 'Ajouter compte bancaire',
             () {
           context
               .go(_hasBankAccount ? '/bank-accounts' : '/bank-account/create');
         }),
-        _quickAction(
+        _quickTile(
             context, Icons.history, 'Historique', () => context.go('/history')),
+        _quickTile(
+            context, Icons.logout, 'Se déconnecter', () => _logout(context)),
       ],
     );
   }
 
-  Widget _quickAction(
+  Widget _quickTile(
       BuildContext context, IconData icon, String title, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -680,7 +719,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     );
   }
 
-  Widget _body(BuildContext context) {
+  Widget _bodyMain(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     return RefreshIndicator(
@@ -701,17 +740,18 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [
-                            Colors.blue.shade600,
-                            Colors.blue.shade400
-                          ]),
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                                color: Colors.blue.shade50.withOpacity(0.4),
-                                blurRadius: 12,
-                                offset: const Offset(0, 6))
-                          ]),
+                        gradient: LinearGradient(colors: [
+                          Colors.blue.shade600,
+                          Colors.blue.shade400
+                        ]),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.blue.shade50.withOpacity(0.4),
+                              blurRadius: 12,
+                              offset: const Offset(0, 6))
+                        ],
+                      ),
                       child: Row(children: [
                         Expanded(
                             child: Column(
@@ -741,11 +781,12 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                     const SizedBox(height: 16),
                     _profileCard(context),
                     const SizedBox(height: 14),
-                    _quickActionsGrid(context),
-                    const SizedBox(height: 14),
+                    // Keep compact quick actions for very narrow screens; main quick actions live in left menu
+                    if (MediaQuery.of(context).size.width <= 720) ...[
+                      _quickActionsGridPlaceholder(context),
+                      const SizedBox(height: 14),
+                    ],
                     _recentActivityCard(context),
-                    const SizedBox(height: 14),
-                    _actionsCard(context),
                     const SizedBox(height: 18),
                     Center(
                         child: Text(
@@ -760,8 +801,30 @@ class _UserHomeScreenState extends State<UserHomeScreen>
     );
   }
 
+  // Fixed footer widget (no service client link; floating button remains)
+  Widget _fixedFooter(BuildContext context) {
+    final version = AuthService.appVersion ?? 'unknown';
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          Text('Version: $version',
+              style: TextStyle(color: Colors.grey.shade700)),
+          const Spacer(),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Layout: left fixed menu + main content, footer fixed at bottom
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Accueil'), elevation: 0, actions: [
@@ -774,11 +837,38 @@ class _UserHomeScreenState extends State<UserHomeScreen>
             icon: const Icon(Icons.settings),
             tooltip: 'Paramètres'),
       ]),
-      body: _body(context),
+      body: Column(
+        children: [
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Left fixed menu (hidden on very narrow viewports)
+                LayoutBuilder(builder: (context, constraints) {
+                  if (constraints.maxWidth < 1000) {
+                    // narrow: hide left menu; mobile sees quick actions inline
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding:
+                        const EdgeInsets.only(left: 18, top: 18, bottom: 18),
+                    child: _leftFixedMenu(context),
+                  );
+                }),
+                // Main scrollable content
+                Expanded(child: _bodyMain(context)),
+              ],
+            ),
+          ),
+          // Fixed footer
+          _fixedFooter(context),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
-          onPressed: () => context.go('/support'),
-          tooltip: 'Aide / Support',
-          child: const Icon(Icons.support_agent_outlined)),
+        onPressed: () => context.go('/support'),
+        tooltip: 'Aide / Support',
+        child: const Icon(Icons.support_agent_outlined),
+      ),
     );
   }
 
@@ -816,20 +906,97 @@ class _UserHomeScreenState extends State<UserHomeScreen>
 
     final prevDate = prev['date_naissance']?.toString() ?? '';
     final nextDate = next['date_naissance']?.toString() ?? '';
-    if (prevDate != nextDate)
+    if (prevDate != nextDate) {
       changes.add('Date de naissance: "$prevDate" → "$nextDate"');
+    }
 
     final prevPhoto = _resolvePhotoPath(prev);
     final nextPhoto = _resolvePhotoPath(next);
     if (prevPhoto != nextPhoto) {
-      if ((prevPhoto ?? '').isEmpty && (nextPhoto ?? '').isNotEmpty)
+      if ((prevPhoto ?? '').isEmpty && (nextPhoto ?? '').isNotEmpty) {
         changes.add('Photo de profil: ajoutée');
-      else if ((prevPhoto ?? '').isNotEmpty && (nextPhoto ?? '').isEmpty)
+      } else if ((prevPhoto ?? '').isNotEmpty && (nextPhoto ?? '').isEmpty) {
         changes.add('Photo de profil: supprimée');
-      else
+      } else {
         changes.add('Photo de profil: mise à jour');
+      }
     }
 
     return changes;
+  }
+}
+
+/// Small reusable menu button widget with hover effect
+class MenuButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? color;
+
+  const MenuButton({
+    Key? key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color,
+  }) : super(key: key);
+
+  @override
+  State<MenuButton> createState() => _MenuButtonState();
+}
+
+class _MenuButtonState extends State<MenuButton> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = _hovering
+        ? Theme.of(context).colorScheme.primary.withOpacity(0.08)
+        : Colors.transparent;
+    final iconBg = _hovering ? Theme.of(context).colorScheme.primary : null;
+    final textColor = _hovering ? Theme.of(context).colorScheme.primary : null;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor:
+                      iconBg ?? widget.color ?? Colors.blue.shade700,
+                  child: Icon(widget.icon, color: Colors.white, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: textColor ??
+                          Theme.of(context).textTheme.bodyMedium?.color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (_hovering)
+                  Icon(Icons.arrow_forward_ios,
+                      size: 14,
+                      color: textColor ??
+                          Theme.of(context).textTheme.bodyMedium?.color),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

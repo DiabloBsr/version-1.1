@@ -23,8 +23,6 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "phone_number",
-            "is_mfa_enabled",
-            "preferred_2fa",
         ]
         read_only_fields = ["id"]
 
@@ -32,14 +30,13 @@ class UserSerializer(serializers.ModelSerializer):
 class ProfileSerializer(serializers.ModelSerializer):
     """
     Sérialiseur du profil.
-    - expose `role` et `mfa_enabled` calculés
+    - expose `role` calculé
     - accepte un sous-objet `user` pour mettre à jour quelques champs utilisateur
     - gère le champ photo si présent
     - attache automatiquement request.user si présent dans le contexte
     """
 
     role = serializers.SerializerMethodField(read_only=True)
-    mfa_enabled = serializers.SerializerMethodField(read_only=True)
     user = UserSerializer(required=False, allow_null=True)
     date_naissance = serializers.DateField(
         required=False,
@@ -55,10 +52,6 @@ class ProfileSerializer(serializers.ModelSerializer):
     def get_role(self, obj: Profile) -> str:
         user = getattr(obj, "user", None)
         return "admin" if (user and getattr(user, "is_superuser", False)) else "user"
-
-    def get_mfa_enabled(self, obj: Profile) -> bool:
-        user = getattr(obj, "user", None)
-        return bool(getattr(user, "is_mfa_enabled", False))
 
     def create(self, validated_data: Dict[str, Any]) -> Profile:
         """
@@ -166,7 +159,7 @@ if BankAccount is not None:
             }
             read_only_fields = ("id", "masked_account")
 
-        def get_masked_account(self, obj: BankAccount) -> Optional[str]: # type: ignore
+        def get_masked_account(self, obj: BankAccount) -> Optional[str]:  # type: ignore
             # support both plain and encrypted field names
             acct = getattr(obj, "account_number", None) or getattr(obj, "account_number_encrypted", None)
             if not acct:

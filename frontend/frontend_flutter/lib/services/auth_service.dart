@@ -1,3 +1,4 @@
+// lib/services/auth_service.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -160,8 +161,6 @@ class AuthService {
         await SecureStorage.delete('pending_profile');
         await SecureStorage.delete('email');
         await SecureStorage.delete('role');
-        await SecureStorage.delete('mfa_enabled');
-        await SecureStorage.delete('otp_verified');
       } catch (inner) {
         debugPrint('SecureStorage fallback delete error: $inner');
       }
@@ -201,17 +200,14 @@ class AuthService {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final role = data['role'] as String?;
-        final mfaEnabled = data['mfa_enabled'] == true;
         final email = (data['user'] is Map)
             ? data['user']['email'] as String?
             : data['email'] as String?;
 
         if (role != null) await SecureStorage.write('role', role);
         if (email != null) await SecureStorage.write('email', email);
-        await SecureStorage.write('mfa_enabled', mfaEnabled ? 'true' : 'false');
 
-        debugPrint(
-            '[AuthService] getProfile: got profile, role=$role mfaEnabled=$mfaEnabled');
+        debugPrint('[AuthService] getProfile: got profile, role=$role');
         return data;
       } else if (res.statusCode == 401) {
         final refreshed = await refreshTokens();
@@ -225,86 +221,6 @@ class AuthService {
       debugPrint('[AuthService] getProfile error: $e\n$st');
     }
     return null;
-  }
-
-  static Future<Map<String, dynamic>?> setupMFA() async {
-    try {
-      final res = await http
-          .get(Uri.parse('$apiBase/auth/mfa/setup/'),
-              headers: await _authHeaders())
-          .timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        debugPrint('[AuthService] setupMFA: success keys=${data.keys}');
-        return data;
-      } else if (res.statusCode == 401) {
-        final refreshed = await refreshTokens();
-        if (refreshed) return setupMFA();
-        debugPrint('[AuthService] setupMFA: unauthorized');
-      } else {
-        debugPrint(
-            '[AuthService] setupMFA: status ${res.statusCode} body=${res.body}');
-      }
-    } catch (e, st) {
-      debugPrint('[AuthService] setupMFA error: $e\n$st');
-    }
-    return null;
-  }
-
-  /// Verify MFA OTP. Returns map with success flag or error detail.
-  static Future<Map<String, dynamic>> verifyMFA(String otp) async {
-    try {
-      final res = await http
-          .post(Uri.parse('$apiBase/auth/mfa/verify/'),
-              headers: await _authHeaders(), body: jsonEncode({'otp': otp}))
-          .timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-
-        // Persist tokens if present
-        final access =
-            (data['access'] as String?) ?? (data['access_token'] as String?);
-        final refresh =
-            (data['refresh'] as String?) ?? (data['refresh_token'] as String?);
-        if (access != null && refresh != null) {
-          await _saveAccessRefresh(access: access, refresh: refresh);
-          debugPrint('[AuthService] verifyMFA: saved access & refresh tokens');
-        }
-
-        // Persist role if provided
-        final role = data['role'] as String?;
-        if (role != null && role.isNotEmpty) {
-          await SecureStorage.write('role', role);
-          debugPrint('[AuthService] verifyMFA: saved role=$role');
-        }
-
-        // Mark OTP verified locally
-        await SecureStorage.write('otp_verified', 'true');
-
-        // Return data augmented with success flag
-        final Map<String, dynamic> result = Map<String, dynamic>.from(data);
-        result['success'] = true;
-        return result;
-      } else if (res.statusCode == 401) {
-        final refreshed = await refreshTokens();
-        if (refreshed) return verifyMFA(otp);
-        debugPrint('[AuthService] verifyMFA: unauthorized');
-      }
-
-      // Try decode error body for caller
-      try {
-        final err = jsonDecode(res.body);
-        return {'success': false, 'error': err};
-      } catch (_) {
-        return {
-          'success': false,
-          'error': 'HTTP ${res.statusCode}: ${res.body}'
-        };
-      }
-    } catch (e, st) {
-      debugPrint('[AuthService] verifyMFA error: $e\n$st');
-      return {'success': false, 'error': e.toString()};
-    }
   }
 
   // --- multipart helpers (mobile + web) ---

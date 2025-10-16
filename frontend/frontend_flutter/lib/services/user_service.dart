@@ -92,11 +92,9 @@ class UserService {
         if (respAnon.statusCode == 401) {
           debugPrint('[UserService] $uri -> 401 (anon) : auth required');
           saw401 = true;
-          // don't continue to parse anonymous body; we'll try authenticated later
           continue;
         }
         if (respAnon.statusCode == 200) {
-          // parse result
           try {
             final body = json.decode(respAnon.body);
             if (body is Map && body.containsKey('exists'))
@@ -112,7 +110,6 @@ class UserService {
           throw Exception(
               'Unexpected response body for existence check: ${respAnon.body}');
         }
-        // any other status: surface error
         throw Exception(
             'Existence check returned status ${respAnon.statusCode}: ${respAnon.body}');
       } on TimeoutException {
@@ -136,7 +133,6 @@ class UserService {
             continue;
           }
           if (resp.statusCode == 401) {
-            // endpoint exists but server requires credentials we don't have/are invalid
             throw EndpointAuthRequiredException(
                 'Endpoint $uri requires authentication');
           }
@@ -274,28 +270,5 @@ class UserService {
     if (res.statusCode != 200) {
       throw Exception('Erreur changePassword: ${res.statusCode} - ${res.body}');
     }
-  }
-
-  /// Activer/désactiver MFA (OTP)
-  static Future<Map<String, dynamic>> setMFA(
-      {required bool enabled, String? method}) async {
-    final token = await SecureStorage.read('access_token');
-    final res = await http
-        .patch(
-          Uri.parse('$baseUrl/profiles/me/mfa/'),
-          headers: {
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({
-            'is_mfa_enabled': enabled,
-            if (method != null) 'preferred_2fa': method
-          }),
-        )
-        .timeout(_singleTimeout);
-    if (res.statusCode != 200) {
-      throw Exception('Erreur setMFA: ${res.statusCode} - ${res.body}');
-    }
-    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 }

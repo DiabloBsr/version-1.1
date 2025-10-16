@@ -13,16 +13,13 @@ Questions fréquentes
 1) Comment récupérer mon mot de passe ?
    - Utilisez "Mot de passe oublié" sur l'écran de connexion pour recevoir un email de réinitialisation.
 
-2) Je ne reçois pas l'OTP (code) ?
-   - Vérifiez le dossier spam, la validité de l'email/numéro et réessayez. Si le problème persiste, contactez le support.
-
-3) Comment modifier ma photo de profil ?
+2) Comment modifier ma photo de profil ?
    - Allez sur "Modifier mon profil", choisissez Galerie ou Caméra puis sauvegardez.
 
-4) Que faire en cas d'erreur réseau ?
+3) Que faire en cas d'erreur réseau ?
    - Vérifiez votre connexion, réessayez plus tard et utilisez la fonction "Rafraîchir" du tableau de bord.
 
-5) Où trouver mes informations de compte ?
+4) Où trouver mes informations de compte ?
    - Dans l'écran Profil ou Accueil vous trouverez nom, email et rôle.
 ''';
 

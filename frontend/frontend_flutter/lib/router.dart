@@ -7,8 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'auth_state.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
-import 'screens/mfa_setup_screen.dart';
-import 'screens/mfa_verify_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/user_home_screen.dart';
 import 'screens/profile_screen.dart';
@@ -61,14 +59,6 @@ GoRouter createRouter(AuthState authState) {
           path: '/profile-extra',
           builder: (BuildContext context, GoRouterState state) =>
               const ProfileExtraScreen()),
-      GoRoute(
-          path: '/mfa-setup',
-          builder: (BuildContext context, GoRouterState state) =>
-              const MFASetupScreen()),
-      GoRoute(
-          path: '/mfa-verify',
-          builder: (BuildContext context, GoRouterState state) =>
-              const MFAVerifyScreen()),
       GoRoute(
           path: '/home',
           builder: (BuildContext context, GoRouterState state) =>
@@ -175,9 +165,6 @@ GoRouter createRouter(AuthState authState) {
       };
 
       final dynamicPublicPaths = Set<String>.from(basePublicPaths);
-      if (authState.pendingLogin == true) {
-        dynamicPublicPaths.add('/mfa-verify');
-      }
 
       final onPublic = dynamicPublicPaths.contains(uriPath);
 
@@ -209,9 +196,7 @@ GoRouter createRouter(AuthState authState) {
           ready && (authState.email != null && authState.email!.isNotEmpty);
 
       debugPrint(
-        'redirect called: initialized=$ready, loggedInSync=$loggedInSync, '
-        'otpVerified=${authState.otpVerified}, mfaEnabled=${authState.mfaEnabled}, '
-        'pendingLogin=${authState.pendingLogin}, role=${authState.role}, uri=$uriPath',
+        'redirect called: initialized=$ready, loggedInSync=$loggedInSync, role=${authState.role}, uri=$uriPath',
       );
 
       if (!ready) return null;
@@ -222,25 +207,8 @@ GoRouter createRouter(AuthState authState) {
         return '/login?next=${_encodeNext(next)}';
       }
 
-      // If pending login (OTP expected) force mfa-verify and preserve next
-      if (authState.pendingLogin == true && uriPath != '/mfa-verify') {
-        final next = state.uri.toString();
-        return '/mfa-verify?next=${_encodeNext(next)}';
-      }
-
-      // If logged in but not otpVerified, force MFA pages, preserve next
-      if (loggedInSync &&
-          !authState.otpVerified &&
-          uriPath != '/mfa-verify' &&
-          uriPath != '/mfa-setup') {
-        final next = state.uri.toString();
-        if (authState.mfaEnabled == true)
-          return '/mfa-verify?next=${_encodeNext(next)}';
-        return '/mfa-setup?next=${_encodeNext(next)}';
-      }
-
-      // If logged in and otpVerified, allow explicitly permitted authenticated routes
-      if (loggedInSync && authState.otpVerified) {
+      // If logged in, allow explicitly permitted authenticated routes
+      if (loggedInSync) {
         // Explicit guard for /users: allow only admin/manager/gestionnaire
         if (uriPath == '/users' || uriPath.startsWith('/users/')) {
           final allowed =
@@ -259,7 +227,6 @@ GoRouter createRouter(AuthState authState) {
           final allowed =
               _hasAnyRole(authState, ['admin', 'manager', 'gestionnaire']);
           if (!allowed) {
-            // Redirect non-authorized roles to their landing page
             final role = authState.role?.toLowerCase();
             if (role == 'admin') return '/dashboard';
             if (role == 'user') return '/user-home';
