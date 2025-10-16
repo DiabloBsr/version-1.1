@@ -39,7 +39,6 @@ class _UsersListScreenState extends State<UsersListScreen> {
   List<Map<String, dynamic>> _users = [];
   List<Map<String, dynamic>> _visible = [];
   String _query = '';
-  int _page = 0;
   final int _pageSize = 25;
 
   final TextEditingController _searchCtrl = TextEditingController();
@@ -71,7 +70,6 @@ class _UsersListScreenState extends State<UsersListScreen> {
       if (!_canUpdate) return;
       setState(() {
         _query = q;
-        _page = 0;
       });
       _performSearch();
     });
