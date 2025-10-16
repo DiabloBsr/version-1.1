@@ -452,7 +452,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               CheckedPopupMenuItem(
                   value: 'bank_account_change',
                   checked: _filter == 'bank_account_change',
-                  child: const Text('Changements compte bancaire')),
+                  child: const Text('Modifications info compte')),
             ],
           ),
         ),
@@ -607,7 +607,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   String _labelForTagFR(String tag) {
     switch (tag) {
       case 'bank_account_change':
-        return 'Changement compte';
+        return 'Compte bancaire';
       case 'profile_change':
         return 'Profil';
       case 'transaction':

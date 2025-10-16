@@ -441,7 +441,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                 decoration: BoxDecoration(
                     color: Colors.green.shade50,
                     borderRadius: BorderRadius.circular(12)),
-                child: Text('Compte',
+                child: Text('Compte bancaire',
                     style:
                         TextStyle(color: Colors.green.shade800, fontSize: 11)),
               );
@@ -463,7 +463,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
               decoration: BoxDecoration(
                   color: Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(12)),
-              child: Text('Général',
+              child: Text('Profil',
                   style: TextStyle(color: Colors.grey.shade800, fontSize: 11)),
             );
           }
